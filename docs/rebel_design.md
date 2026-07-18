@@ -36,47 +36,62 @@ target. So the engine is built and exhaustively tested first.
 euchre/            # the game (no ML dependency)
   cards.py         # deck, bowers, trick resolution  ✅ tested
   actions.py       # action types + flat index space ✅ tested
-  game.py          # state machine, legal moves, scoring ✅ tested
+  game.py          # state machine, legal moves, scoring ✅ tested (fast clone)
   infoset.py       # infoset keys + observation tensors ✅ tested
 rebel/
   mccfr.py         # external-sampling MCCFR (tabular ground truth) ✅ runs
-  networks.py      # PolicyValueNet, PBSValueNet (PyTorch) ✅ forward-tested
+  networks.py      # PolicyValueNet, PBSValueNet (PyTorch) ✅ tested
   evaluate.py      # agents + head-to-head harness ✅ tested
-  public_belief_state.py  # PBS construction + features  ⏳ next
-  cfr_subgame.py          # depth-limited CFR-D subgame solver ⏳ next
-  train_rebel.py          # the ReBeL self-play loop        ⏳ next
+  solver.py        # double-dummy alpha-beta solver ✅ tested vs brute force
+  pimc.py          # PIMC search agent ✅ tested
+  public_belief_state.py  # void-aware determinization ✅ tested
+  subgame.py       # depth-limited CFR subgame solver ✅ tested vs double-dummy
+  train_rebel.py   # the ReBeL self-play loop ✅ runs & learns
 ```
 
 ## Roadmap
 
-### Milestone 0 — Foundation ✅ (this commit)
+### Milestone 0 — Foundation ✅
 Correct engine, encodings, tabular MCCFR, evaluation harness, PyTorch nets.
 MCCFR gives us a learner that improves on the *real* game and a way to
 measure strength against baselines.
 
-### Milestone 1 — Belief state & subgame solver
-1. **PBS construction**: given a public state, represent the belief as a
-   distribution over deals consistent with the public information (start with
-   uniform over legal completions; refine with a learned belief net).
-2. **Depth-limited subgame**: build the tree of public states from a root PBS
-   down to a depth limit; at leaves, call the value net instead of recursing.
-3. **CFR-D / linear CFR** inside the subgame to compute an equilibrium of the
-   depth-limited game.
+### Milestone 0.5 — PIMC search ✅
+`solver.py` is an exact double-dummy solver (alpha-beta + transposition table +
+double-dummy move reduction), verified against brute-force minimax. `pimc.py`
+samples worlds from the acting player's belief, solves each, and averages —
+genuine decision-time reasoning about hidden cards, and a strong benchmark.
 
-### Milestone 2 — The ReBeL loop
-Following the paper's algorithm:
-1. Start at the initial PBS.
-2. Build a depth-limited subgame; run `T` iterations of CFR using the value
-   net at leaves.
-3. Sample an iteration `t ∈ [1, T]`; set the root policy to iteration `t`'s
-   average strategy.
-4. Add `(PBS, computed values)` to the value-net training set; add
-   `(infoset, strategy)` to the policy-net set.
-5. Sample a leaf PBS according to the strategy and recurse (self-play descent).
-6. Periodically retrain the nets on the accumulated data.
+### Milestone 1 — Belief state & subgame solver ✅
+1. **Belief / determinization** (`public_belief_state.py`): samples full deals
+   consistent with the public information, respecting hand sizes, played cards,
+   void inferences, and the up-card's (sometimes uncertain) location. Fixing
+   the acting player's hand guarantees their real infoset is covered.
+2. **Depth-limited subgame** (`subgame.py`): treats "nature picks a world" as a
+   chance root and runs vanilla CFR over the resulting game, sharing regret
+   across worlds via infoset keys. A depth limit cuts the tree; leaf values come
+   from the value function (network) — or, with no limit, it solves to terminal
+   (exact given the belief), verified to match double-dummy on single worlds.
 
-Bootstrapping: the tabular MCCFR strategies from Milestone 0 provide value
-and policy targets to warm-start the nets before full ReBeL self-play.
+### Milestone 2 — The ReBeL loop ✅
+`train_rebel.py` implements the self-play cycle:
+1. Play hands; at each decision run the depth-limited CFR subgame solver, with
+   the current network valuing the leaves.
+2. The solved root strategy is the policy played (sampled); it and the solved
+   root value become training targets.
+3. Train one `PolicyValueNet` — policy head via cross-entropy to the CFR
+   strategies, value head via MSE to the CFR root values.
+4. The improving value head sharpens the leaf estimates that feed the next
+   round of search — ReBeL's bootstrap.
+`ReBeLNetAgent` then plays from the trained policy head at inference speed, with
+`CFRSearchAgent` available to layer search back on top.
+
+> **Performance caveat.** The engine is pure Python, so a single self-play hand
+> (a CFR solve per decision, network-valued leaves) takes ~20s at tiny
+> settings. The loop is built to *run and learn* correctly; reaching expert
+> strength needs far more self-play, which in turn needs a faster engine
+> (vectorized/batched inference, or the hot paths in C). That optimization is
+> the main lever remaining and is called out in Milestone 4.
 
 ### Milestone 3 — Team-game correctness & strength
 * Team subtleties: partners share reward but not information. Evaluate whether
@@ -86,8 +101,13 @@ and policy targets to warm-start the nets before full ReBeL self-play.
   high-variance and high-value.
 * Keep policies stochastic (mixed strategies are optimal here).
 
-### Milestone 4 — Evaluation & tuning
-* Elo across a pool (random, rule-based, MCCFR, ReBeL checkpoints).
+### Milestone 4 — Performance, evaluation & tuning
+* **Speed (the current bottleneck):** batch network leaf-evaluations across a
+  CFR sweep; cache/incrementalize `infoset_key` and `observation_tensor`; move
+  the engine hot paths (`apply`, `legal_actions`, trick resolution) to a
+  vectorized or compiled representation. This is what unlocks enough self-play
+  to matter.
+* Elo across a pool (random, rule-based, PIMC, MCCFR, ReBeL checkpoints).
 * **Local best response / exploitability** to quantify how far from optimal.
 * Ablations: depth limit, CFR iterations, belief-net quality, self-play
   population.

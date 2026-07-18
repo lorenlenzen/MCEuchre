@@ -52,10 +52,15 @@ def known_voids(state: EuchreState) -> Dict[int, Set[Suit]]:
     return voids
 
 
-def _pickup_happened(state: EuchreState) -> bool:
-    """True if the up-card was ordered up and the dealer picked it up."""
+def _ordered_up(state: EuchreState) -> bool:
+    """True if the up-card was accepted as trump in round 1 (dealer picks up)."""
     return (state.up_card is not None and state.trump is not None
             and state.maker is not None and state.turned_down is None)
+
+
+def _pickup_happened(state: EuchreState) -> bool:
+    """Back-compat alias: the up-card was ordered up and picked up."""
+    return _ordered_up(state)
 
 
 def sample_determinization(state: EuchreState, player: int,
@@ -69,7 +74,8 @@ def sample_determinization(state: EuchreState, player: int,
     voids = known_voids(state)
     trump = state.trump
     up = state.up_card
-    pickup = _pickup_happened(state)
+    ordered_up = _ordered_up(state)
+    discard_done = len(state.kitty) == 4  # only a pickup discard grows kitty to 4
 
     # Cards whose location the player already knows for certain.
     known: Set[Card] = set(state.hands[player])
@@ -77,23 +83,44 @@ def sample_determinization(state: EuchreState, player: int,
         known.update(c for _, c in plays)
     known.update(c for _, c in state.current_trick)
 
-    # The up-card. Before any pickup it lives in its own public slot (preserved
-    # by clone) and is never re-sampled. After a pickup, only the dealer knows
-    # where it went; other players sample it between the dealer's hand and the
-    # kitty (the possible discard).
-    if up is not None and (not pickup or player == state.dealer):
-        known.add(up)  # public slot, or dealer knows their own hand/discard
-    up_is_floating = pickup and player != state.dealer and up is not None
+    # The up-card and kitty. Four cases:
+    #  1. Not ordered up (bidding, or a round-2 call): the up-card sits in its
+    #     own public slot (preserved by clone), never re-sampled; kitty hidden.
+    #  2. Ordered up, querying player IS the dealer: the dealer knows their own
+    #     hand and, once they have discarded, their discard (the last kitty
+    #     card) -- so that kitty card is fixed.
+    #  3. Ordered up, other player, before the discard: the up-card is known to
+    #     be in the dealer's hand (it cannot be in the kitty yet).
+    #  4. Ordered up, other player, after the discard: the up-card floats
+    #     between the dealer's hand and the kitty (the possible discard).
+    # ``up_constraint`` pins the up-card's allowed destinations for cases 3/4;
+    # it stays in the unseen pool rather than being fixed as known.
+    kitty_fixed: List[Card] = []
+    up_constraint: Optional[dict] = None
+    if up is not None:
+        if not ordered_up:
+            known.add(up)                                    # case 1
+        elif player == state.dealer:                         # case 2
+            known.add(up)
+            if discard_done:
+                discard = state.kitty[-1]
+                known.add(discard)
+                kitty_fixed.append(discard)
+        elif not discard_done:                               # case 3
+            up_constraint = {"seats": [state.dealer], "kitty": False}
+        else:                                                # case 4
+            up_constraint = {"seats": [state.dealer], "kitty": True}
 
     # Hidden slots to fill from the unseen pool.
     unseen = [c for c in DECK if c not in known]
     need = {p: len(state.hands[p]) for p in range(4)}
     need[player] = 0  # own hand already fixed
     kitty_target = len(state.kitty)
+    kitty_slots = kitty_target - len(kitty_fixed)
 
-    if sum(need.values()) + kitty_target != len(unseen):
+    if sum(need.values()) + kitty_slots != len(unseen):
         raise RuntimeError("Determinization slot count mismatch "
-                           f"(need={need}, kitty={kitty_target}, "
+                           f"(need={need}, kitty_slots={kitty_slots}, "
                            f"unseen={len(unseen)}).")
 
     for _ in range(max_tries):
@@ -102,13 +129,12 @@ def sample_determinization(state: EuchreState, player: int,
         assign: Dict[int, List[Card]] = {p: list(state.hands[p]) if p == player
                                          else [] for p in range(4)}
         cur_need = dict(need)
-        kitty: List[Card] = []
+        kitty: List[Card] = list(kitty_fixed)
 
         def destinations(card: Card) -> List[int]:
             """Seats with remaining room that may legally hold ``card``."""
-            if up_is_floating and card == up:
-                # Floating up-card may only be in the dealer's hand (or kitty).
-                return [state.dealer] if cur_need[state.dealer] > 0 else []
+            if up_constraint is not None and card == up:
+                return [p for p in up_constraint["seats"] if cur_need[p] > 0]
             opts = []
             for p in range(4):
                 if p == player or cur_need[p] <= 0:
@@ -117,6 +143,11 @@ def sample_determinization(state: EuchreState, player: int,
                     continue
                 opts.append(p)
             return opts
+
+        def kitty_allowed(card: Card) -> bool:
+            if up_constraint is not None and card == up:
+                return up_constraint["kitty"]
+            return True
 
         def place(i: int) -> bool:
             if i == len(pool):
@@ -132,7 +163,7 @@ def sample_determinization(state: EuchreState, player: int,
                     return True
                 assign[p].pop()
                 cur_need[p] += 1
-            if len(kitty) < kitty_target:
+            if kitty_allowed(card) and len(kitty) < kitty_target:
                 kitty.append(card)
                 if place(i + 1):
                     return True

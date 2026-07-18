@@ -1,50 +1,73 @@
-"""End-to-end smoke demo: train tabular MCCFR briefly and measure strength.
+"""End-to-end tour of the MCEuchre stack.
 
 Run:  python scripts/demo.py
 
-This is a sanity/orientation script, not a full training run. It shows the
-moving parts working together: the engine, the MCCFR learner, and the
-evaluation harness. Real strength needs far more iterations (and, ultimately,
-the ReBeL neural pipeline described in docs/rebel_design.md).
+Shows the pieces working together: the engine, the double-dummy solver, PIMC
+search, the CFR subgame solver, and one generation of the ReBeL self-play loop.
+Counts are deliberately tiny so it finishes in a couple of minutes -- real
+strength needs far more search and self-play (see docs/rebel_design.md).
 """
 
 import random
 import time
 
-from rebel.mccfr import MCCFRTrainer
-from rebel.evaluate import (
-    evaluate, RandomAgent, RuleBasedAgent, MCCFRAgent,
-)
-from rebel.public_belief_state import sample_determinization
-from euchre.game import EuchreState
-from euchre.infoset import infoset_key
+from euchre.game import EuchreState, Phase
+from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
+from rebel.solver import solve_value, best_play
+from rebel.pimc import PIMCAgent
+from rebel.subgame import SubgameSolver
+from rebel.train_rebel import ReBeLTrainer
+
+
+def _reach_play(seed):
+    rng = random.Random(seed)
+    s = EuchreState.new_hand(dealer=rng.randint(0, 3)).deal(rng)
+    while not s.is_terminal() and s.phase != Phase.PLAY:
+        s = s.apply(rng.choice(s.legal_actions()))
+    while not s.is_terminal() and len(s.hands[s.current_player]) > 3:
+        s = s.apply(rng.choice(s.legal_actions()))
+    return s
 
 
 def main() -> None:
-    print("== Baselines ==")
+    print("== 1. Baseline: heuristic vs random ==")
     stats = evaluate(RuleBasedAgent, RandomAgent, hands=400, seed=1)
-    print(f"RuleBased vs Random: mean pt diff "
-          f"{stats['team0_mean_point_diff']:+.3f} "
-          f"± {stats['ci95']:.3f}, win rate {stats['team0_win_rate']:.3f}")
+    print(f"   RuleBased vs Random: {stats['team0_mean_point_diff']:+.3f} "
+          f"pt/hand (win rate {stats['team0_win_rate']:.2f})")
 
-    print("\n== Training MCCFR (tiny illustrative run) ==")
-    print("(Full Euchre has a huge infoset space, so a short tabular run stays")
-    print(" near-random -- this is exactly the motivation for ReBeL's neural")
-    print(" generalization; see docs/rebel_design.md.)")
-    trainer = MCCFRTrainer(seed=0)
+    print("\n== 2. Double-dummy solver ==")
+    s = _reach_play(2)
+    print(f"   Perfect-info value of a mid-play position (team0-team1): "
+          f"{solve_value(s)}; optimal play: {best_play(s)}")
+
+    print("\n== 3. PIMC search picks a move under hidden information ==")
+    agent = PIMCAgent(worlds=10, seed=0)
+    move = agent.act(s, random.Random(0))
+    print(f"   PIMC (10 worlds) chooses: {move}")
+
+    print("\n== 4. CFR subgame solver (ReBeL's search core) ==")
     t0 = time.time()
-    trainer.train(iterations=100, log_every=50)
-    print(f"trained in {time.time() - t0:.1f}s, "
-          f"{len(trainer.nodes)} infosets visited")
+    solver = SubgameSolver(s, s.current_player, num_worlds=10, iterations=40,
+                           rng=random.Random(0))
+    solver.run()
+    pol = solver.root_policy()
+    print(f"   Solved a play subgame in {time.time() - t0:.1f}s. Root policy:")
+    for a, p in sorted(pol.items(), key=lambda kv: -kv[1])[:3]:
+        print(f"     {p:.3f}  {a}")
 
-    print("\n== Determinization sample (decision-time belief) ==")
-    s = EuchreState.new_hand(dealer=0).deal(random.Random(7))
-    p = s.current_player
-    print(f"Player {p} sees their hand; sampling a consistent world:")
-    sample = sample_determinization(s, p, random.Random(0))
-    for q in range(4):
-        tag = "  (me)" if q == p else ""
-        print(f"  P{q}: " + " ".join(str(c) for c in sample.hands[q]) + tag)
+    print("\n== 5. ReBeL self-play loop (one tiny generation) ==")
+    print("   (Solves a depth-limited subgame at every decision, values the")
+    print("    leaves with the net, then trains the net on the results.)")
+    trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=3, depth_limit=3, seed=0)
+    t0 = time.time()
+    hist = trainer.train(generations=1, hands_per_gen=1, train_steps=5,
+                         batch_size=32)
+    st = hist[-1]
+    print(f"   gen 1 in {time.time() - t0:.0f}s: collected {st['buffer']} "
+          f"training samples")
+    print(f"   policy_loss={st['policy_loss']:.4f}  "
+          f"value_loss={st['value_loss']:.4f}")
+    print("\nDone. See docs/rebel_design.md for scaling this to expert play.")
 
 
 if __name__ == "__main__":

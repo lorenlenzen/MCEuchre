@@ -17,3 +17,6 @@ packages = ["euchre", "rebel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks slow tests (search-heavy); run with -m slow",
+]

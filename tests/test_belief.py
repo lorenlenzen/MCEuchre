@@ -83,6 +83,26 @@ def test_determinization_respects_voids():
                     f"seat {p} void {voids[p]} but holds {c}")
 
 
+def test_determinization_every_node_every_perspective():
+    """Sampling must stay consistent at bidding, discard, and play nodes, from
+    every player's viewpoint (covers the up-card location edge cases)."""
+    rng = random.Random(0)
+    checked = 0
+    for seed in range(40):
+        s = EuchreState.new_hand(dealer=rng.randint(0, 3)).deal(random.Random(seed))
+        guard = 0
+        while not s.is_terminal():
+            for player in range(4):
+                sample = sample_determinization(s, player, random.Random(player + seed))
+                _assert_consistent(s, sample, player)
+                checked += 1
+            s = s.apply(rng.choice(s.legal_actions()))
+            guard += 1
+            if guard > 40:
+                break
+    assert checked > 200
+
+
 def test_determinization_at_start_of_play():
     rng = random.Random(3)
     s = EuchreState.new_hand(dealer=0).deal(rng)

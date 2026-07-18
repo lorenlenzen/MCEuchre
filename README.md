@@ -15,28 +15,43 @@ games.
 
 ## Status
 
-This repo currently contains **Milestone 0: the foundation** — a correct,
-fully-tested game engine plus the learning and search building blocks ReBeL
-needs.
+A full, tested path from the rules engine to a running **ReBeL self-play
+loop**, plus a **PIMC** search agent as a strong baseline.
 
 | Piece | What it is | State |
 |---|---|---|
-| `euchre/` | Rules engine: cards, bowers, bidding, play, scoring | ✅ tested (24-card deck, left-bower-as-trump, lone marches, stick-the-dealer) |
-| `euchre/infoset.py` | Information-set keys + fixed-length observation tensors | ✅ tested |
-| `rebel/mccfr.py` | External-sampling MCCFR — a tabular learner on the *real* game | ✅ runs |
-| `rebel/public_belief_state.py` | Consistent determinization / belief sampling (void-aware) | ✅ tested |
-| `rebel/networks.py` | PyTorch policy/value and PBS-value networks | ✅ forward-tested |
-| `rebel/evaluate.py` | Reference agents + head-to-head evaluation harness | ✅ tested |
+| `euchre/` | Rules engine: cards, bowers, bidding, play, scoring | ✅ tested (left-bower-as-trump, lone marches, stick-the-dealer) |
+| `euchre/infoset.py` | Information-set keys + observation tensors | ✅ tested |
+| `rebel/solver.py` | Exact double-dummy solver (alpha-beta + move reduction) | ✅ verified vs brute force |
+| `rebel/pimc.py` | PIMC search agent (sample worlds → solve → average) | ✅ tested |
+| `rebel/public_belief_state.py` | Void-aware determinization / belief sampling | ✅ tested |
+| `rebel/subgame.py` | Depth-limited CFR subgame solver (ReBeL's search core) | ✅ verified vs double-dummy |
+| `rebel/train_rebel.py` | The ReBeL self-play loop (search → targets → train net) | ✅ runs & learns |
+| `rebel/mccfr.py` | External-sampling MCCFR — tabular learner on the real game | ✅ runs |
+| `rebel/networks.py` | PyTorch policy/value and PBS-value networks | ✅ tested |
+| `rebel/evaluate.py` | Reference agents + head-to-head harness | ✅ tested |
 
-Next milestones (belief-state subgame solver → the ReBeL self-play loop) are
-laid out in the design doc.
+The remaining lever to expert strength is **performance** (the engine is pure
+Python); the roadmap is in [`docs/rebel_design.md`](docs/rebel_design.md).
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-pytest -q                 # run the test suite (32 tests)
-python scripts/demo.py    # train MCCFR briefly and measure strength
+pytest -q                 # fast suite (45 tests); add -m slow for search-heavy ones
+python scripts/demo.py    # tour: baselines, solver, PIMC, CFR subgame, ReBeL loop
+```
+
+## How the ReBeL pieces fit
+
+```
+                 determinization (belief)         value/policy net
+                        │                                │
+   state ──► SubgameSolver: CFR over sampled worlds ─────┤ leaves valued by net
+                        │                                │
+                 root strategy + value ──► training targets ──► train net
+                        │                                        (bootstraps leaves)
+                   sample action ──► next state
 ```
 
 ## Layout

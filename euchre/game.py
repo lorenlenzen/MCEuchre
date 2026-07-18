@@ -15,7 +15,6 @@ Design notes
 
 from __future__ import annotations
 
-import copy
 import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -92,7 +91,33 @@ class EuchreState:
     # -- construction --------------------------------------------------------
 
     def clone(self) -> "EuchreState":
-        return copy.deepcopy(self)
+        """Fast copy for search. ``Card`` is immutable and ``apply`` always
+        reassigns whole lists (never mutates them in place), so a one-level
+        copy of the mutable containers is sufficient -- and far cheaper than
+        ``copy.deepcopy``, which dominates CFR/MCCFR runtime.
+        """
+        s = EuchreState.__new__(EuchreState)
+        s.dealer = self.dealer
+        s.phase = self.phase
+        s.current_player = self.current_player
+        s.hands = [list(h) for h in self.hands]
+        s.up_card = self.up_card
+        s.kitty = list(self.kitty)
+        s.trump = self.trump
+        s.maker = self.maker
+        s.alone = self.alone
+        s.lone_player = self.lone_player
+        s.sitting = self.sitting
+        s.turned_down = self.turned_down
+        s.bids_seen = self.bids_seen
+        s.round1_pickup_pending = self.round1_pickup_pending
+        s.trick_leader = self.trick_leader
+        s.current_trick = list(self.current_trick)
+        s.completed_tricks = list(self.completed_tricks)
+        s.tricks_won = list(self.tricks_won)
+        s.stick_the_dealer = self.stick_the_dealer
+        s.reward = self.reward
+        return s
 
     @staticmethod
     def new_hand(dealer: int = 0, stick_the_dealer: bool = False) -> "EuchreState":

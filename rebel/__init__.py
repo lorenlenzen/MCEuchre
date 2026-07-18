@@ -8,9 +8,21 @@ from .evaluate import (
     evaluate,
     play_hand,
 )
+from .solver import solve_value, best_play, action_values
+from .pimc import PIMCAgent, rollout_value
+from .public_belief_state import sample_determinization, known_voids
+from .subgame import SubgameSolver, CFRSearchAgent
+from .networks import PolicyValueNet, PBSValueNet
+from .train_rebel import ReBeLTrainer, ReBeLNetAgent, legal_mask
 
 __all__ = [
     "MCCFRTrainer", "Node",
     "RandomAgent", "RuleBasedAgent", "MCCFRAgent",
     "evaluate", "play_hand",
+    "solve_value", "best_play", "action_values",
+    "PIMCAgent", "rollout_value",
+    "sample_determinization", "known_voids",
+    "SubgameSolver", "CFRSearchAgent",
+    "PolicyValueNet", "PBSValueNet",
+    "ReBeLTrainer", "ReBeLNetAgent", "legal_mask",
 ]
