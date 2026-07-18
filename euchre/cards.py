@@ -46,6 +46,9 @@ class Rank(IntEnum):
 RANKS: List[Rank] = [Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE]
 SUITS: List[Suit] = [Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES]
 
+# Precomputed rank -> index, to keep Card.id off the O(n) list.index path.
+_RANK_INDEX = {rank: i for i, rank in enumerate(RANKS)}
+
 # Same-color partner suit. Left bower = Jack of the trump's same-color suit.
 _SAME_COLOR = {
     Suit.CLUBS: Suit.SPADES,
@@ -67,8 +70,12 @@ class Card:
 
     @property
     def id(self) -> int:
-        """Stable index in [0, 24) for one-hot encoding: suit * 6 + rank_index."""
-        return int(self.suit) * 6 + RANKS.index(self.rank)
+        """Stable index in [0, 24) for one-hot encoding: suit * 6 + rank_index.
+
+        Uses a precomputed rank index rather than ``RANKS.index`` -- this is on
+        the hottest path in CFR/solver search (millions of calls).
+        """
+        return int(self.suit) * 6 + _RANK_INDEX[self.rank]
 
     def __str__(self) -> str:
         return f"{self.rank.symbol}{self.suit.symbol}"

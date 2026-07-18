@@ -55,16 +55,19 @@ def main() -> None:
     for a, p in sorted(pol.items(), key=lambda kv: -kv[1])[:3]:
         print(f"     {p:.3f}  {a}")
 
-    print("\n== 5. ReBeL self-play loop (one tiny generation) ==")
-    print("   (Solves a depth-limited subgame at every decision, values the")
-    print("    leaves with the net, then trains the net on the results.)")
-    trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=3, depth_limit=3, seed=0)
+    print("\n== 5. ReBeL self-play loop ==")
+    print("   (Solves a depth-limited subgame at every decision, batch-values")
+    print("    the leaves with the net, then trains the net on the results.)")
+    trainer = ReBeLTrainer(num_worlds=6, cfr_iterations=15, depth_limit=4,
+                           seed=0)
     t0 = time.time()
-    hist = trainer.train(generations=1, hands_per_gen=1, train_steps=5,
-                         batch_size=32)
+    hands = 8
+    hist = trainer.train(generations=2, hands_per_gen=hands // 2, train_steps=8,
+                         batch_size=64)
+    dt = time.time() - t0
     st = hist[-1]
-    print(f"   gen 1 in {time.time() - t0:.0f}s: collected {st['buffer']} "
-          f"training samples")
+    print(f"   {hands} self-play hands + training in {dt:.0f}s "
+          f"({dt / hands:.2f}s/hand); buffer={st['buffer']} samples")
     print(f"   policy_loss={st['policy_loss']:.4f}  "
           f"value_loss={st['value_loss']:.4f}")
     print("\nDone. See docs/rebel_design.md for scaling this to expert play.")

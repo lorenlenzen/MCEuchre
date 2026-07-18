@@ -31,8 +31,12 @@ loop**, plus a **PIMC** search agent as a strong baseline.
 | `rebel/networks.py` | PyTorch policy/value and PBS-value networks | ✅ tested |
 | `rebel/evaluate.py` | Reference agents + head-to-head harness | ✅ tested |
 
-The remaining lever to expert strength is **performance** (the engine is pure
-Python); the roadmap is in [`docs/rebel_design.md`](docs/rebel_design.md).
+The search/self-play hot paths are optimized (persistent CFR tree, batched leaf
+evaluation, arithmetic `Card.id`, list-based regret matching): a self-play hand
+at a useful search setting dropped from **~20s to ~0.45s (~44×)**, so thousands
+of hands take minutes. The path to expert strength (more self-play, belief
+refinement, team-play conventions) is in
+[`docs/rebel_design.md`](docs/rebel_design.md).
 
 ## Quick start
 

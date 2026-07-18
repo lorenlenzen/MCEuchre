@@ -86,12 +86,37 @@ genuine decision-time reasoning about hidden cards, and a strong benchmark.
 `ReBeLNetAgent` then plays from the trained policy head at inference speed, with
 `CFRSearchAgent` available to layer search back on top.
 
-> **Performance caveat.** The engine is pure Python, so a single self-play hand
-> (a CFR solve per decision, network-valued leaves) takes ~20s at tiny
-> settings. The loop is built to *run and learn* correctly; reaching expert
-> strength needs far more self-play, which in turn needs a faster engine
-> (vectorized/batched inference, or the hot paths in C). That optimization is
-> the main lever remaining and is called out in Milestone 4.
+### Performance
+
+Profiling drove the optimization, not guesswork. A CFR solve started out
+~53% in `infoset_key` (with `Card.id` doing an O(n) `list.index` on every one
+of millions of calls), and self-play re-derived the entire subgame tree —
+`infoset_key`, `apply`, `clone`, `legal_actions`, *and every network leaf
+call* — on **every CFR iteration**, even though the tree is identical across
+iterations. The fixes:
+
+1. **`Card.id` → arithmetic** (precomputed rank index): removes the single
+   hottest call.
+2. **Persistent CFR tree** (`SubgameSolver`): expand the subgame once into
+   cached nodes that hold a shared `_Info`; iterations then do pure
+   regret-matching arithmetic. This takes `infoset_key`/`apply`/`clone` (and
+   leaf values) out of the per-iteration loop.
+3. **De-NumPy'd regret matching**: infosets have ≤ ~6 actions, where NumPy's
+   per-call overhead is pure cost, so the accumulators are plain Python lists.
+4. **Batched leaf evaluation** (`batch_value_fn`): every depth-limit leaf in a
+   solve is valued in **one** network forward pass instead of one-per-leaf.
+
+Measured result: a full-depth 3-card CFR solve went **~16s → ~2.8s**, and a
+self-play hand at a useful search setting (8 worlds, 20 CFR iters, depth 4)
+went **~20s → ~0.45s (~44×)** — enough that thousands of self-play hands are a
+matter of minutes rather than hours. The correctness suite is unchanged (the
+optimized solver still matches double-dummy and brute force).
+
+Further headroom, if needed: vectorize CFR across the belief worlds (they share
+the public tree), cache/incrementalize `observation_tensor`, and — as the last
+resort — move the engine hot paths to a compiled representation (bitboards in
+C/Cython). Given tree-search's tiny per-op data, that C step is a smaller
+multiplier than the structural fixes above already delivered.
 
 ### Milestone 3 — Team-game correctness & strength
 * Team subtleties: partners share reward but not information. Evaluate whether

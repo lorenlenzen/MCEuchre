@@ -69,12 +69,23 @@ class ReBeLTrainer:
 
     def value_fn(self, state: EuchreState) -> float:
         """Estimate team0 - team1 point differential at a subgame leaf."""
-        player = state.current_player if not state.is_terminal() else 0
-        obs = torch.from_numpy(observation_tensor(state, player)).unsqueeze(0)
+        return self.batch_value_fn([state])[0]
+
+    def batch_value_fn(self, states: List[EuchreState]) -> List[float]:
+        """Value many leaves in a single network forward pass.
+
+        Each leaf is encoded from its own acting player's perspective; the
+        network predicts that team's differential, converted to team0 - team1.
+        """
+        players = [s.current_player if not s.is_terminal() else 0
+                   for s in states]
+        obs = np.stack([observation_tensor(s, p)
+                        for s, p in zip(states, players)])
         with torch.no_grad():
-            _, v = self.net(obs)
-        val = float(v.item())  # predicted differential for `player`'s team
-        return val if team_of(player) == 0 else -val
+            _, v = self.net(torch.from_numpy(obs))
+        v = v.numpy()
+        return [float(v[i]) if team_of(players[i]) == 0 else -float(v[i])
+                for i in range(len(states))]
 
     # -- self-play -----------------------------------------------------------
 
@@ -90,7 +101,7 @@ class ReBeLTrainer:
             solver = SubgameSolver(
                 state, actor, num_worlds=self.num_worlds,
                 iterations=self.cfr_iterations, depth_limit=self.depth_limit,
-                value_fn=self.value_fn, rng=self.rng)
+                batch_value_fn=self.batch_value_fn, rng=self.rng)
             solver.run()
             policy = solver.root_policy()
             root_val = solver.root_value()  # team0 - team1
