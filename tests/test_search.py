@@ -114,6 +114,49 @@ def test_pimc_plays_legally_and_finishes():
     assert sum(s.tricks_won) in (0, 5)
 
 
+def test_strong_pimc_time_budget_plays_legally():
+    from rebel.pimc import strong_pimc
+    agent = strong_pimc(play_budget=0.2, call_budget=0.2, seed=0)
+    s = EuchreState.new_hand(dealer=0).deal(random.Random(3))
+    rng = random.Random(0)
+    guard = 0
+    while not s.is_terminal():
+        a = agent.act(s, rng)
+        assert a in s.legal_actions()
+        s = s.apply(a)
+        guard += 1
+        assert guard < 60
+    assert sum(s.tricks_won) in (0, 5)
+
+
+def test_pimc_budget_samples_at_least_min_worlds(monkeypatch):
+    """A time budget keeps sampling worlds (>= min_worlds), unlike the fixed
+    small-count mode."""
+    import rebel.pimc as P
+    from rebel.pimc import PIMCAgent
+    calls = {"n": 0}
+    orig = P.sample_determinization
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+    monkeypatch.setattr(P, "sample_determinization", counting)
+
+    agent = PIMCAgent(play_budget=0.15, min_worlds=10, max_worlds=400, seed=0)
+    s = None
+    for seed in range(10):  # skip the occasional all-pass misdeal
+        s = EuchreState.new_hand(dealer=0).deal(random.Random(seed))
+        while s.phase != Phase.PLAY and not s.is_terminal():
+            s = s.apply(agent.act(s, random.Random(0)))
+        if s.phase == Phase.PLAY:
+            break
+    assert s.phase == Phase.PLAY
+    calls["n"] = 0
+    a = agent.act(s, random.Random(0))
+    assert a in s.legal_actions()
+    assert calls["n"] >= 10
+
+
 @pytest.mark.slow
 def test_pimc_beats_random():
     stats = evaluate(lambda: PIMCAgent(worlds=6, call_worlds=4),

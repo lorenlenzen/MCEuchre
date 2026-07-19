@@ -9,7 +9,7 @@ from .evaluate import (
     play_hand,
 )
 from .solver import solve_value, best_play, action_values
-from .pimc import PIMCAgent, rollout_value
+from .pimc import PIMCAgent, rollout_value, strong_pimc
 from .public_belief_state import sample_determinization, known_voids
 from .belief_model import (
     BiddingBeliefModel,
@@ -41,7 +41,7 @@ __all__ = [
     "RandomAgent", "RuleBasedAgent", "MCCFRAgent",
     "evaluate", "play_hand",
     "solve_value", "best_play", "action_values",
-    "PIMCAgent", "rollout_value",
+    "PIMCAgent", "rollout_value", "strong_pimc",
     "sample_determinization", "known_voids",
     "BiddingBeliefModel", "sample_weighted_belief", "suit_strength",
     "SubgameSolver", "CFRSearchAgent",
