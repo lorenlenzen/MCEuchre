@@ -32,7 +32,9 @@ from .ladder import (
     evaluate_ladder,
     format_leaderboard,
 )
-from .train_rebel import ReBeLTrainer, ReBeLNetAgent, legal_mask
+from .train_rebel import (
+    ReBeLTrainer, ReBeLNetAgent, legal_mask, batch_value_fn_from_net,
+)
 
 __all__ = [
     "MCCFRTrainer", "Node",
@@ -48,5 +50,5 @@ __all__ = [
     "CoordinationGame", "EuchreEndgame", "sample_endgame_worlds",
     "AgentSpec", "play_match", "round_robin", "evaluate_ladder",
     "format_leaderboard",
-    "ReBeLTrainer", "ReBeLNetAgent", "legal_mask",
+    "ReBeLTrainer", "ReBeLNetAgent", "legal_mask", "batch_value_fn_from_net",
 ]

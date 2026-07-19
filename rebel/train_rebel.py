@@ -43,6 +43,23 @@ def legal_mask(state: EuchreState) -> np.ndarray:
     return mask
 
 
+def batch_value_fn_from_net(net: PolicyValueNet):
+    """A batched leaf-value function for a net: many states -> one forward pass,
+    each returning the team0 - team1 point-differential estimate. Used to plug a
+    trained net into the CFR subgame solver at play time."""
+    def fn(states: List[EuchreState]) -> List[float]:
+        players = [s.current_player if not s.is_terminal() else 0
+                   for s in states]
+        obs = np.stack([observation_tensor(s, p)
+                        for s, p in zip(states, players)])
+        with torch.no_grad():
+            _, v = net(torch.from_numpy(obs))
+        v = v.numpy()
+        return [float(v[i]) if team_of(players[i]) == 0 else -float(v[i])
+                for i in range(len(states))]
+    return fn
+
+
 @dataclass
 class Sample:
     obs: np.ndarray          # observation from the actor's perspective
@@ -74,20 +91,9 @@ class ReBeLTrainer:
         return self.batch_value_fn([state])[0]
 
     def batch_value_fn(self, states: List[EuchreState]) -> List[float]:
-        """Value many leaves in a single network forward pass.
-
-        Each leaf is encoded from its own acting player's perspective; the
-        network predicts that team's differential, converted to team0 - team1.
-        """
-        players = [s.current_player if not s.is_terminal() else 0
-                   for s in states]
-        obs = np.stack([observation_tensor(s, p)
-                        for s, p in zip(states, players)])
-        with torch.no_grad():
-            _, v = self.net(torch.from_numpy(obs))
-        v = v.numpy()
-        return [float(v[i]) if team_of(players[i]) == 0 else -float(v[i])
-                for i in range(len(states))]
+        """Value many leaves in a single network forward pass (see
+        ``batch_value_fn_from_net``)."""
+        return batch_value_fn_from_net(self.net)(states)
 
     # -- self-play -----------------------------------------------------------
 

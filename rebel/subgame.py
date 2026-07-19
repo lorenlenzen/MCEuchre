@@ -249,11 +249,13 @@ class CFRSearchAgent:
     def __init__(self, num_worlds: int = 16, iterations: int = 30,
                  depth_limit: Optional[int] = None,
                  value_fn: Optional[ValueFn] = None,
+                 batch_value_fn: Optional[BatchValueFn] = None,
                  belief_model=None, greedy: bool = True, seed: int = 0) -> None:
         self.num_worlds = num_worlds
         self.iterations = iterations
         self.depth_limit = depth_limit
         self.value_fn = value_fn
+        self.batch_value_fn = batch_value_fn
         self.belief_model = belief_model
         self.greedy = greedy
         self._rng = random.Random(seed)
@@ -265,8 +267,8 @@ class CFRSearchAgent:
         solver = SubgameSolver(
             state, state.current_player, num_worlds=self.num_worlds,
             iterations=self.iterations, depth_limit=self.depth_limit,
-            value_fn=self.value_fn, belief_model=self.belief_model,
-            rng=self._rng)
+            value_fn=self.value_fn, batch_value_fn=self.batch_value_fn,
+            belief_model=self.belief_model, rng=self._rng)
         solver.run()
         policy = solver.root_policy()
         actions = list(policy)
