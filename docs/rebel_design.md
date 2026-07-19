@@ -112,11 +112,38 @@ went **~20s → ~0.45s (~44×)** — enough that thousands of self-play hands ar
 matter of minutes rather than hours. The correctness suite is unchanged (the
 optimized solver still matches double-dummy and brute force).
 
-Further headroom, if needed: vectorize CFR across the belief worlds (they share
-the public tree), cache/incrementalize `observation_tensor`, and — as the last
-resort — move the engine hot paths to a compiled representation (bitboards in
-C/Cython). Given tree-search's tiny per-op data, that C step is a smaller
-multiplier than the structural fixes above already delivered.
+#### Cross-worlds vectorization: attempted, and why it doesn't pay off
+
+The obvious next idea is to vectorize CFR across the belief worlds. It was
+investigated and **does not work for a sampled belief** — a result worth
+recording so it isn't re-attempted:
+
+* Branching the tree *per world* diverges immediately: after one ply, 20
+  sampled worlds already present 13 distinct legal-action sets; by depth 4 a
+  depth-limited subgame has 911 nodes but 892 infosets, only **one** shared
+  across nodes. Nothing to bundle.
+* Re-organizing into a **public tree** (branch on the played card, pool all
+  consistent deals per node — `rebel/range_cfr.py`, the DeepStack structure)
+  is correct (M=1 reproduces double-dummy; root value matches the scalar
+  solver) but still doesn't vectorize: a player's strategy is per information
+  set (exact hand), so deals must be grouped by hand, and randomly sampled
+  deals almost never share an exact opponent hand. Measured at depth 4 / 80
+  deals: 885 nodes, 2927 groups, **average group size 1.2**. NumPy over
+  size-1 arrays is slower than the lean scalar recursion.
+
+The only formulation that truly vectorizes is the **dense enumerated range**:
+carry a belief vector over *all* possible hands (not a sample) and
+matrix-multiply strategies against it, with explicit **card-removal** for joint
+consistency. Full joint enumeration is intractable mid-game (>300k consistent
+deals), so it needs per-player marginal ranges plus a 4-player + kitty
+card-removal correction — a genuine research effort (DeepStack did this for
+heads-up poker; the 4-player partnership + kitty extension is novel). That is
+the real path if this lever is pursued.
+
+Lower-risk headroom that *does* apply: cache/incrementalize
+`observation_tensor`, and — given tree search's tiny, unaligned per-op data —
+move the engine hot paths to a compiled representation (bitboards in
+C/Cython), a mechanical multiplier on top of the structural fixes above.
 
 ### Milestone 3 — Team-game correctness & strength
 * Team subtleties: partners share reward but not information. Evaluate whether
