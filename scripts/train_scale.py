@@ -28,6 +28,8 @@ def main() -> None:
     ap.add_argument("--num-worlds", type=int, default=6)
     ap.add_argument("--cfr-iters", type=int, default=12)
     ap.add_argument("--depth-limit", type=int, default=4)
+    ap.add_argument("--full-depth-cards", type=int, default=0,
+                    help="solve to terminal when <= this many cards remain")
     ap.add_argument("--out", type=str, default="rebel_scale")
     ap.add_argument("--resume", type=str, default=None,
                     help="checkpoint .pt to warm-start the net from")
@@ -35,8 +37,8 @@ def main() -> None:
 
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
-        depth_limit=args.depth_limit, belief_model=BiddingBeliefModel(),
-        lr=1e-3, seed=0)
+        depth_limit=args.depth_limit, full_depth_cards=args.full_depth_cards,
+        belief_model=BiddingBeliefModel(), lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")

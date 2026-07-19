@@ -30,7 +30,7 @@ import torch
 import torch.nn.functional as F
 
 from euchre.actions import NUM_ACTIONS, action_to_index
-from euchre.game import EuchreState, team_of
+from euchre.game import EuchreState, Phase, team_of
 from euchre.infoset import observation_tensor, OBS_SIZE
 from .networks import PolicyValueNet
 from .subgame import SubgameSolver
@@ -73,7 +73,7 @@ class ReBeLTrainer:
                  depth_limit: int = 4, num_worlds: int = 8,
                  cfr_iterations: int = 20, lr: float = 1e-3,
                  buffer_size: int = 20000, belief_model=None,
-                 seed: int = 0) -> None:
+                 full_depth_cards: int = 0, seed: int = 0) -> None:
         self.net = net or PolicyValueNet()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.depth_limit = depth_limit
@@ -82,7 +82,20 @@ class ReBeLTrainer:
         self.buffer: List[Sample] = []
         self.buffer_size = buffer_size
         self.belief_model = belief_model
+        # "As much depth as feasible per position": when the acting player has
+        # <= full_depth_cards cards left, solve the subgame to *terminal* (exact
+        # CFR targets, no value net) since the tree is then cheap. Deeper into
+        # the hand this yields exact endgame targets that anchor the value net,
+        # so the depth-limited early-game leaves it feeds are less noisy.
+        self.full_depth_cards = full_depth_cards
         self.rng = random.Random(seed)
+
+    def _depth_for(self, state: EuchreState) -> Optional[int]:
+        if (self.full_depth_cards > 0 and state.phase == Phase.PLAY
+                and len(state.hands[state.current_player])
+                <= self.full_depth_cards):
+            return None  # full-depth / exact
+        return self.depth_limit
 
     # -- leaf value from the current network ---------------------------------
 
@@ -108,7 +121,7 @@ class ReBeLTrainer:
             actor = state.current_player
             solver = SubgameSolver(
                 state, actor, num_worlds=self.num_worlds,
-                iterations=self.cfr_iterations, depth_limit=self.depth_limit,
+                iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
                 batch_value_fn=self.batch_value_fn,
                 belief_model=self.belief_model, rng=self.rng)
             solver.run()
