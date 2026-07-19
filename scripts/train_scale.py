@@ -29,12 +29,17 @@ def main() -> None:
     ap.add_argument("--cfr-iters", type=int, default=12)
     ap.add_argument("--depth-limit", type=int, default=4)
     ap.add_argument("--out", type=str, default="rebel_scale")
+    ap.add_argument("--resume", type=str, default=None,
+                    help="checkpoint .pt to warm-start the net from")
     args = ap.parse_args()
 
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
         depth_limit=args.depth_limit, belief_model=BiddingBeliefModel(),
         lr=1e-3, seed=0)
+    if args.resume:
+        trainer.net.load_state_dict(torch.load(args.resume))
+        print(f"resumed from {args.resume}")
 
     log = []
     total_hands = 0
