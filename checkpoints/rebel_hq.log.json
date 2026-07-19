@@ -1,0 +1,50 @@
+[
+  {
+    "gen": 3,
+    "hands": 24,
+    "buffer": 364,
+    "elapsed_s": 637,
+    "policy_loss": 0.7144,
+    "value_loss": 0.0612,
+    "vs_random": 0.625,
+    "win_random": 0.575,
+    "vs_rule": -0.79,
+    "win_rule": 0.08
+  },
+  {
+    "gen": 6,
+    "hands": 48,
+    "buffer": 744,
+    "elapsed_s": 1337,
+    "policy_loss": 0.5537,
+    "value_loss": 0.0412,
+    "vs_random": 0.635,
+    "win_random": 0.64,
+    "vs_rule": -0.62,
+    "win_rule": 0.315
+  },
+  {
+    "gen": 9,
+    "hands": 72,
+    "buffer": 1125,
+    "elapsed_s": 2064,
+    "policy_loss": 0.4432,
+    "value_loss": 0.0272,
+    "vs_random": 0.44,
+    "win_random": 0.58,
+    "vs_rule": -0.585,
+    "win_rule": 0.41
+  },
+  {
+    "gen": 12,
+    "hands": 96,
+    "buffer": 1487,
+    "elapsed_s": 2747,
+    "policy_loss": 0.475,
+    "value_loss": 0.0305,
+    "vs_random": 0.75,
+    "win_random": 0.68,
+    "vs_rule": -0.55,
+    "win_rule": 0.32
+  }
+]
