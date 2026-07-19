@@ -202,15 +202,25 @@ reference here makes the technique concrete and quantifies the correlation gap.
 * Keep policies stochastic (mixed strategies are optimal here).
 
 ### Milestone 4 — Performance, evaluation & tuning
-* **Speed (the current bottleneck):** batch network leaf-evaluations across a
-  CFR sweep; cache/incrementalize `infoset_key` and `observation_tensor`; move
-  the engine hot paths (`apply`, `legal_actions`, trick resolution) to a
-  vectorized or compiled representation. This is what unlocks enough self-play
-  to matter.
-* Elo across a pool (random, rule-based, PIMC, MCCFR, ReBeL checkpoints).
-* **Local best response / exploitability** to quantify how far from optimal.
-* Ablations: depth limit, CFR iterations, belief-net quality, self-play
-  population.
+
+* **Evaluation ladder ✅** (`rebel/ladder.py`, `scripts/ladder.py`). A
+  round-robin tournament that fits **Bradley-Terry / Elo** ratings from the
+  pairwise results (the MLE model behind Elo), with a leaderboard reporting
+  Elo, win rate, average margin, and bootstrap confidence intervals. Seat bias
+  is cancelled by alternating orientation *decoupled from* the dealer rotation
+  (an early version accidentally kept one agent on the dealing team every hand —
+  self-play flushed it out at +0.5 margin, now ~0). This makes "expert"
+  measurable: strength is Elo separation from the field, and from a strong
+  searcher (PIMC) in particular.
+* **Exploitability (future):** exact best response is intractable here; a
+  local-best-response (LBR) lower bound — a searcher that best-responds to a
+  fixed agent using the double-dummy solver over the induced belief — is the
+  natural next measurement.
+* **Speed:** already largely addressed (persistent CFR tree, batched leaf
+  evaluation, arithmetic `Card.id`); the remaining lever is compiling the
+  engine hot paths (see the performance section above).
+* Ablations to run on the ladder: depth limit, CFR iterations, belief model
+  on/off, self-play population.
 
 ## Design decisions & rationale
 

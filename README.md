@@ -29,6 +29,7 @@ loop**, plus a **PIMC** search agent as a strong baseline.
 | `rebel/subgame.py` | Depth-limited CFR subgame solver (ReBeL's search core) | ✅ verified vs double-dummy |
 | `rebel/train_rebel.py` | The ReBeL self-play loop (search → targets → train net) | ✅ runs & learns |
 | `rebel/tmecor.py` | Correlated team play (TMECor) for small subgames | ✅ validated (correlation gap on a known game; TMECor ≥ Nash on Euchre) |
+| `rebel/ladder.py` | Elo evaluation ladder (round robin + Bradley-Terry) | ✅ tested (`scripts/ladder.py`) |
 | `rebel/mccfr.py` | External-sampling MCCFR — tabular learner on the real game | ✅ runs |
 | `rebel/networks.py` | PyTorch policy/value and PBS-value networks | ✅ tested |
 | `rebel/evaluate.py` | Reference agents + head-to-head harness | ✅ tested |
@@ -44,8 +45,9 @@ refinement, team-play conventions) is in
 
 ```bash
 pip install -r requirements.txt
-pytest -q                 # fast suite (45 tests); add -m slow for search-heavy ones
+pytest -q                 # fast suite; add -m slow for search-heavy ones
 python scripts/demo.py    # tour: baselines, solver, PIMC, CFR subgame, ReBeL loop
+python scripts/ladder.py  # Elo leaderboard over a pool of agents (--pimc for search)
 ```
 
 ## How the ReBeL pieces fit

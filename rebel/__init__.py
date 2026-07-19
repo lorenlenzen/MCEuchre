@@ -25,6 +25,13 @@ from .tmecor import (
     solve_zero_sum,
 )
 from .team_games import CoordinationGame, EuchreEndgame, sample_endgame_worlds
+from .ladder import (
+    AgentSpec,
+    play_match,
+    round_robin,
+    evaluate_ladder,
+    format_leaderboard,
+)
 from .train_rebel import ReBeLTrainer, ReBeLNetAgent, legal_mask
 
 __all__ = [
@@ -39,5 +46,7 @@ __all__ = [
     "PolicyValueNet", "PBSValueNet",
     "TeamGame", "tmecor_value", "independent_nash_value", "solve_zero_sum",
     "CoordinationGame", "EuchreEndgame", "sample_endgame_worlds",
+    "AgentSpec", "play_match", "round_robin", "evaluate_ladder",
+    "format_leaderboard",
     "ReBeLTrainer", "ReBeLNetAgent", "legal_mask",
 ]
