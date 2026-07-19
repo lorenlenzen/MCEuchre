@@ -169,13 +169,29 @@ Implemented:
   mixed strategy; temperature keeps the policy from collapsing to a
   deterministic, exploitable one.
 
-Team-correlation note (deliberate scoping): partners share reward (utility is
-the team point differential, verified by test) but not information, so they can
-only coordinate hidden-information conventions through public actions. The
-solver uses **independent per-player CFR**, which finds an equilibrium but does
-not by itself develop optimal *signalling* conventions — that needs a
-correlated formulation (a team maxmin / TMECor solve), which is a known,
-larger research step and is not implemented here.
+Team-correlation note: partners share reward (utility is the team point
+differential, verified by test) but not information, so they can only coordinate
+hidden-information conventions through public actions. The main pipeline uses
+**independent per-player CFR**, which finds an equilibrium but does not by
+itself develop optimal *signalling* conventions.
+
+**Correlated team play (TMECor)** — the fix for that — is implemented as a
+validated reference in `rebel/tmecor.py`. A team playing with correlation is a
+single *coordinator* whose pure strategies are the team's joint deterministic
+plans (one action per team infoset); TMECor is a Nash equilibrium of the
+zero-sum game coordinator-A vs coordinator-B, which we solve with regret
+matching (no LP dependency). It is validated on a canonical coordination game
+where correlation strictly helps — **TMECor reaches the correlated optimum 0
+while independent CFR is trapped at −1** (analytic best-independent / TME is
+−0.5, so correlation is worth +0.5 over the best product strategy) — and it
+respects the provable inequality **TMECor ≥ Nash** on real Euchre endgames.
+
+Scope, honestly (as with `range_cfr`): enumerating joint pure strategies is
+exponential in the number of team infosets, so this is exact only for small
+subgames (endgames / toys) and is wired into nothing. Scaling it to full games
+needs the compact team representations from the literature (column generation
+over best-response oracles, or TB-DAG CFR) — a genuine research step. The
+reference here makes the technique concrete and quantifies the correlation gap.
 
 #### Original Milestone 3 notes
 * Team subtleties: partners share reward but not information. Evaluate whether

@@ -18,6 +18,13 @@ from .belief_model import (
 )
 from .subgame import SubgameSolver, CFRSearchAgent
 from .networks import PolicyValueNet, PBSValueNet
+from .tmecor import (
+    TeamGame,
+    tmecor_value,
+    independent_nash_value,
+    solve_zero_sum,
+)
+from .team_games import CoordinationGame, EuchreEndgame, sample_endgame_worlds
 from .train_rebel import ReBeLTrainer, ReBeLNetAgent, legal_mask
 
 __all__ = [
@@ -30,5 +37,7 @@ __all__ = [
     "BiddingBeliefModel", "sample_weighted_belief", "suit_strength",
     "SubgameSolver", "CFRSearchAgent",
     "PolicyValueNet", "PBSValueNet",
+    "TeamGame", "tmecor_value", "independent_nash_value", "solve_zero_sum",
+    "CoordinationGame", "EuchreEndgame", "sample_endgame_worlds",
     "ReBeLTrainer", "ReBeLNetAgent", "legal_mask",
 ]
