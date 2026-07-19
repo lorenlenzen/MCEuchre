@@ -66,10 +66,12 @@ class PIMCAgent:
     """
 
     def __init__(self, worlds: int = 20, call_worlds: int = 10,
-                 call_threshold: float = 0.4, seed: int = 0) -> None:
+                 call_threshold: float = 0.4, belief_model=None,
+                 seed: int = 0) -> None:
         self.worlds = worlds
         self.call_worlds = call_worlds
         self.call_threshold = call_threshold
+        self.belief_model = belief_model
         self._rng = random.Random(seed)
 
     # -- public API ----------------------------------------------------------
@@ -86,10 +88,17 @@ class PIMCAgent:
 
     # -- play / discard via the solver --------------------------------------
 
-    def _sample_worlds(self, state: EuchreState, actor: int, n: int
-                       ) -> List[EuchreState]:
-        return [sample_determinization(state, actor, self._rng)
-                for _ in range(n)]
+    def _sample_belief(self, state: EuchreState, actor: int, n: int
+                       ) -> "tuple[List[EuchreState], List[float]]":
+        """Return (worlds, weights). Weights condition on the bidding when a
+        belief model is set, else uniform."""
+        if self.belief_model is not None:
+            from .belief_model import sample_weighted_belief
+            return sample_weighted_belief(state, actor, n, self.belief_model,
+                                          self._rng)
+        worlds = [sample_determinization(state, actor, self._rng)
+                  for _ in range(n)]
+        return worlds, [1.0 / n] * n
 
     def _act_play(self, state: EuchreState) -> Action:
         actor = state.current_player
@@ -98,11 +107,12 @@ class PIMCAgent:
         if len(legal) == 1:
             return legal[0]
         totals: Dict[Action, float] = {a: 0.0 for a in legal}
-        for world in self._sample_worlds(state, actor, self.worlds):
+        worlds, weights = self._sample_belief(state, actor, self.worlds)
+        for world, w in zip(worlds, weights):
             memo: dict = {}  # shared across sibling actions in this world
             for a in legal:
                 v = solve_value(world.apply(a), memo)
-                totals[a] += _team_sign(v, team)
+                totals[a] += w * _team_sign(v, team)
         return max(totals, key=lambda a: totals[a])
 
     def _act_discard(self, state: EuchreState) -> Action:
@@ -110,11 +120,12 @@ class PIMCAgent:
         team = team_of(actor)
         legal = state.legal_actions()
         totals: Dict[Action, float] = {a: 0.0 for a in legal}
-        for world in self._sample_worlds(state, actor, self.worlds):
+        worlds, weights = self._sample_belief(state, actor, self.worlds)
+        for world, w in zip(worlds, weights):
             memo: dict = {}
             for a in legal:
                 v = solve_value(world.apply(a), memo)
-                totals[a] += _team_sign(v, team)
+                totals[a] += w * _team_sign(v, team)
         return max(totals, key=lambda a: totals[a])
 
     # -- bidding via a determinized value search ----------------------------
@@ -130,7 +141,9 @@ class PIMCAgent:
     def _act_bid(self, state: EuchreState) -> Action:
         actor = state.current_player
         legal = state.legal_actions()
-        worlds = self._sample_worlds(state, actor, self.call_worlds)
+        # No trump is set yet, so there is no bidding to condition on; the
+        # belief is uniform here regardless of model.
+        worlds, _weights = self._sample_belief(state, actor, self.call_worlds)
 
         # Value each non-pass option; passing is approximated as neutral (0).
         best_action: Optional[Action] = None

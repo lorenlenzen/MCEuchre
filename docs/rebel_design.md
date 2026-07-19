@@ -145,7 +145,39 @@ Lower-risk headroom that *does* apply: cache/incrementalize
 move the engine hot paths to a compiled representation (bitboards in
 C/Cython), a mechanical multiplier on top of the structural fixes above.
 
-### Milestone 3 — Team-game correctness & strength
+### Milestone 3 — Team-game correctness & strength ✅ (first cut)
+
+Implemented:
+
+* **Belief refinement conditioned on the bidding** (`rebel/belief_model.py`).
+  The uniform determinizer ignores what the *bidding* revealed; a player who
+  ordered up or called a suit almost certainly holds strong trump. A monotonic
+  soft model of calling behaviour reweights each sampled deal by how well it
+  explains the observed bids (order-ups, passes, and going alone), and the
+  weights flow into the CFR chance-reach and PIMC averaging. Verified to
+  sharpen the belief in the right direction: across sampled positions the
+  maker's reconstructed hand carries **+0.76** more trump strength under the
+  weighted belief than under the uniform one (higher in 100% of positions).
+  Opt-in via a `belief_model` argument on `PIMCAgent`, `SubgameSolver`,
+  `CFRSearchAgent`, and `ReBeLTrainer`.
+* **Separate calling / play network heads** (`PolicyValueNet`). The flat action
+  space splits into card plays `[0,24)` and bidding/discard `[24,59)`, each with
+  its own output head so the two very different decision types specialise.
+  Going alone is first-class in the action space (`OrderUp(alone)`,
+  `Call(alone)`).
+* **Stochastic play** (`ReBeLNetAgent` temperature). Optimal play here is a
+  mixed strategy; temperature keeps the policy from collapsing to a
+  deterministic, exploitable one.
+
+Team-correlation note (deliberate scoping): partners share reward (utility is
+the team point differential, verified by test) but not information, so they can
+only coordinate hidden-information conventions through public actions. The
+solver uses **independent per-player CFR**, which finds an equilibrium but does
+not by itself develop optimal *signalling* conventions — that needs a
+correlated formulation (a team maxmin / TMECor solve), which is a known,
+larger research step and is not implemented here.
+
+#### Original Milestone 3 notes
 * Team subtleties: partners share reward but not information. Evaluate whether
   independent-per-player CFR suffices or whether a joint/correlated policy
   (TMECor-style) is needed for the calling and signaling conventions.

@@ -37,8 +37,15 @@ class MLP(nn.Module):
         return self.head(self.trunk(x))
 
 
+# The flat action space splits cleanly into play (card plays) and bidding
+# (discard / call / order-up / pass). Giving each its own output head lets the
+# two very different decision types specialise instead of sharing one linear
+# layer. Going alone is already first-class (OrderUp(alone), Call(alone)).
+_NUM_PLAY_ACTIONS = 24  # indices [0, 24)
+
+
 class PolicyValueNet(nn.Module):
-    """Shared trunk with a policy head and a scalar value head."""
+    """Shared trunk with separate play/bidding policy heads and a value head."""
 
     def __init__(self, obs_size: int = OBS_SIZE, num_actions: int = NUM_ACTIONS,
                  hidden: int = 256, depth: int = 3) -> None:
@@ -47,12 +54,14 @@ class PolicyValueNet(nn.Module):
         for _ in range(depth - 1):
             layers += [nn.Linear(hidden, hidden), nn.ReLU()]
         self.trunk = nn.Sequential(*layers)
-        self.policy_head = nn.Linear(hidden, num_actions)
+        self.play_head = nn.Linear(hidden, _NUM_PLAY_ACTIONS)
+        self.bid_head = nn.Linear(hidden, num_actions - _NUM_PLAY_ACTIONS)
         self.value_head = nn.Linear(hidden, 1)
 
     def forward(self, obs: torch.Tensor):
         h = self.trunk(obs)
-        return self.policy_head(h), self.value_head(h).squeeze(-1)
+        logits = torch.cat([self.play_head(h), self.bid_head(h)], dim=-1)
+        return logits, self.value_head(h).squeeze(-1)
 
     def policy(self, obs: torch.Tensor,
                legal_mask: Optional[torch.Tensor] = None) -> torch.Tensor:

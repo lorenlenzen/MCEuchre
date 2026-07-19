@@ -55,7 +55,8 @@ class ReBeLTrainer:
     def __init__(self, net: Optional[PolicyValueNet] = None,
                  depth_limit: int = 4, num_worlds: int = 8,
                  cfr_iterations: int = 20, lr: float = 1e-3,
-                 buffer_size: int = 20000, seed: int = 0) -> None:
+                 buffer_size: int = 20000, belief_model=None,
+                 seed: int = 0) -> None:
         self.net = net or PolicyValueNet()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.depth_limit = depth_limit
@@ -63,6 +64,7 @@ class ReBeLTrainer:
         self.cfr_iterations = cfr_iterations
         self.buffer: List[Sample] = []
         self.buffer_size = buffer_size
+        self.belief_model = belief_model
         self.rng = random.Random(seed)
 
     # -- leaf value from the current network ---------------------------------
@@ -101,7 +103,8 @@ class ReBeLTrainer:
             solver = SubgameSolver(
                 state, actor, num_worlds=self.num_worlds,
                 iterations=self.cfr_iterations, depth_limit=self.depth_limit,
-                batch_value_fn=self.batch_value_fn, rng=self.rng)
+                batch_value_fn=self.batch_value_fn,
+                belief_model=self.belief_model, rng=self.rng)
             solver.run()
             policy = solver.root_policy()
             root_val = solver.root_value()  # team0 - team1
@@ -181,9 +184,11 @@ class ReBeLNetAgent:
     top for extra strength.
     """
 
-    def __init__(self, net: PolicyValueNet, greedy: bool = True) -> None:
+    def __init__(self, net: PolicyValueNet, greedy: bool = True,
+                 temperature: float = 1.0) -> None:
         self.net = net
         self.greedy = greedy
+        self.temperature = temperature
 
     def act(self, state: EuchreState, rng: random.Random):
         legal = state.legal_actions()
@@ -202,4 +207,10 @@ class ReBeLNetAgent:
             probs = probs / probs.sum()
         if self.greedy:
             return legal[int(np.argmax(probs))]
+        # Optimal play in an imperfect-information game is a *mixed* strategy;
+        # temperature keeps the agent from collapsing to a deterministic (and
+        # thus exploitable) policy.
+        if self.temperature != 1.0:
+            probs = probs ** (1.0 / self.temperature)
+            probs = probs / probs.sum()
         return legal[rng.choices(range(len(legal)), weights=probs.tolist())[0]]
