@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import queue
+import sys
 import time
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -119,7 +120,17 @@ def main():
     # The learner reuses ReBeLTrainer purely for its buffer + train_step.
     learner = ReBeLTrainer(net=net, lr=args.lr)
 
-    ctx = mp.get_context("fork")
+    # 'fork' is fast/low-overhead but Linux-only; Windows has only 'spawn',
+    # and 'fork' is unsafe with torch on macOS -- so use fork only on Linux.
+    # MCEUCHRE_MP_METHOD overrides (e.g. force 'spawn').
+    forced = os.environ.get("MCEUCHRE_MP_METHOD")
+    if forced:
+        ctx = mp.get_context(forced)
+    elif sys.platform.startswith("linux") and "fork" in mp.get_all_start_methods():
+        ctx = mp.get_context("fork")
+    else:
+        ctx = mp.get_context("spawn")
+    print(f"multiprocessing start method: {ctx.get_start_method()}", flush=True)
     weights_path = args.out + ".weights.pt"
     _atomic_save(net, weights_path)
     version = ctx.Value("i", 1)
