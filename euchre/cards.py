@@ -100,18 +100,46 @@ NUM_CARDS = len(DECK)  # 24
 
 
 # --- Trump-aware helpers ----------------------------------------------------
+#
+# Precomputed once at import: is_right_bower/is_left_bower/is_trump/
+# effective_suit sit on the hottest path in this codebase (CFR tree
+# construction and card_strength/trick_winner during every apply(), plus
+# observation_tensor's per-card loop) -- tens of millions of calls per hand
+# at typical search settings (profiled: is_left_bower alone ~86M calls over
+# 3 hands at num-worlds=24/depth=6). Each is a pure function of
+# (card.id, trump) over a fixed 24x4 domain, so a single array index in
+# place of the enum comparisons is a real constant-factor win at that call
+# volume -- same output, verified by the existing test suite, which already
+# exercises these functions extensively (trick resolution, follow-suit
+# legality, observation encoding).
+
+_IS_RIGHT_BOWER = [[False] * 4 for _ in range(NUM_CARDS)]
+_IS_LEFT_BOWER = [[False] * 4 for _ in range(NUM_CARDS)]
+_IS_TRUMP = [[False] * 4 for _ in range(NUM_CARDS)]
+_EFFECTIVE_SUIT = [[None] * 4 for _ in range(NUM_CARDS)]  # trump is never None here
+
+for _c in DECK:
+    for _t in SUITS:
+        _rb = _c.rank == Rank.JACK and _c.suit == _t
+        _lb = _c.rank == Rank.JACK and _c.suit == same_color_suit(_t)
+        _IS_RIGHT_BOWER[_c.id][int(_t)] = _rb
+        _IS_LEFT_BOWER[_c.id][int(_t)] = _lb
+        _IS_TRUMP[_c.id][int(_t)] = (_c.suit == _t) or _lb
+        _EFFECTIVE_SUIT[_c.id][int(_t)] = _t if _lb else _c.suit
+del _c, _t, _rb, _lb
+
 
 def is_right_bower(card: Card, trump: Suit) -> bool:
-    return card.rank == Rank.JACK and card.suit == trump
+    return _IS_RIGHT_BOWER[card.id][int(trump)]
 
 
 def is_left_bower(card: Card, trump: Suit) -> bool:
-    return card.rank == Rank.JACK and card.suit == same_color_suit(trump)
+    return _IS_LEFT_BOWER[card.id][int(trump)]
 
 
 def is_trump(card: Card, trump: Suit) -> bool:
     """A card is trump if it is in the trump suit OR it is the left bower."""
-    return card.suit == trump or is_left_bower(card, trump)
+    return _IS_TRUMP[card.id][int(trump)]
 
 
 def effective_suit(card: Card, trump: Optional[Suit]) -> Suit:
@@ -120,9 +148,9 @@ def effective_suit(card: Card, trump: Optional[Suit]) -> Suit:
     With no trump set (during the deal / before a call) the effective suit is
     just the printed suit.
     """
-    if trump is not None and is_left_bower(card, trump):
-        return trump
-    return card.suit
+    if trump is None:
+        return card.suit
+    return _EFFECTIVE_SUIT[card.id][int(trump)]
 
 
 # Strength of a card *within the trump suit*, high value = stronger.

@@ -85,6 +85,14 @@ class EuchreState:
     # Config
     stick_the_dealer: bool = False
 
+    # Match score (race-to-target) as of the START of this hand -- fixed for
+    # the hand's whole duration, only advanced between hands by whatever
+    # constructs the next EuchreState. Defaults to 0-0 so every existing
+    # single-hand caller (tests, evaluate.py, scripts) is unaffected unless it
+    # explicitly opts in. See rebel/match_equity.py.
+    team0_score: int = 0
+    team1_score: int = 0
+
     # Result (set at terminal)
     reward: Optional[Tuple[int, int]] = None  # points to (team0, team1)
 
@@ -116,16 +124,21 @@ class EuchreState:
         s.completed_tricks = list(self.completed_tricks)
         s.tricks_won = list(self.tricks_won)
         s.stick_the_dealer = self.stick_the_dealer
+        s.team0_score = self.team0_score
+        s.team1_score = self.team1_score
         s.reward = self.reward
         return s
 
     @staticmethod
-    def new_hand(dealer: int = 0, stick_the_dealer: bool = False) -> "EuchreState":
+    def new_hand(dealer: int = 0, stick_the_dealer: bool = False,
+                 team0_score: int = 0, team1_score: int = 0) -> "EuchreState":
         return EuchreState(
             dealer=dealer,
             phase=Phase.DEAL,
             current_player=CHANCE,
             stick_the_dealer=stick_the_dealer,
+            team0_score=team0_score,
+            team1_score=team1_score,
         )
 
     # -- dealing (chance) ----------------------------------------------------

@@ -23,7 +23,7 @@ from .cards import (
     Card, Suit, Rank, RANKS, SUITS, NUM_CARDS, _RANK_INDEX,
     same_color_suit, effective_suit, is_trump, is_left_bower, is_right_bower,
 )
-from .game import EuchreState, Phase
+from .game import EuchreState, Phase, team_of
 
 
 def _rel(seat: int, me: int) -> int:
@@ -33,7 +33,11 @@ def _rel(seat: int, me: int) -> int:
 
 def infoset_key(state: EuchreState, player: int) -> str:
     """Canonical string for the information set of ``player`` at ``state``."""
-    parts: List[str] = [f"ph{state.phase.value}", f"d{_rel(state.dealer, player)}"]
+    my_score, their_score = (
+        (state.team0_score, state.team1_score) if team_of(player) == 0
+        else (state.team1_score, state.team0_score))
+    parts: List[str] = [f"ph{state.phase.value}", f"d{_rel(state.dealer, player)}",
+                        f"sc{my_score},{their_score}"]
 
     # Private hand (sorted by id for canonical order).
     hand_ids = sorted(c.id for c in state.hands[player])
@@ -83,6 +87,13 @@ def infoset_key(state: EuchreState, player: int) -> str:
 _PHASES = [Phase.BID_ROUND_1, Phase.BID_ROUND_2, Phase.DEALER_DISCARD,
            Phase.PLAY, Phase.TERMINAL]
 
+# Race-to-target match score. A hand's starting score is always < this for
+# both teams (the match ends, and no further hand is dealt, the instant a
+# team reaches it), so team score / MATCH_TARGET always lands in [0, 1).
+# rebel/match_equity.py imports this so the equity table and the observation
+# encoding always agree on what "match" means.
+MATCH_TARGET = 10
+
 # Roles of a suit relative to the reference suit R.
 _ROLE_REF, _ROLE_NEXT, _ROLE_GREEN = 0, 1, 2
 N_ROLES = 3
@@ -103,7 +114,8 @@ _GLOBAL = (
     + 1            # up-card visible?
     + 6            # up-card rank one-hot (belongs to the reference suit)
     + 4            # led-card role this trick: none/ref/next/green
-)  # = 30
+    + 2            # match score: mine, theirs (/MATCH_TARGET)
+)  # = 32
 
 _SUIT_BLOCK = (
     N_ROLES        # role one-hot (ref/next/green)
@@ -177,6 +189,11 @@ def observation_tensor(state: EuchreState, player: int) -> np.ndarray:
     my_team = player % 2
     v[o] = state.tricks_won[my_team] / 5.0
     v[o + 1] = state.tricks_won[1 - my_team] / 5.0
+    o += 2
+    my_score = state.team0_score if my_team == 0 else state.team1_score
+    their_score = state.team1_score if my_team == 0 else state.team0_score
+    v[o] = my_score / MATCH_TARGET
+    v[o + 1] = their_score / MATCH_TARGET
     o += 2
     v[o] = 1.0 if (state.phase == Phase.PLAY and not state.current_trick) else 0.0
     o += 1

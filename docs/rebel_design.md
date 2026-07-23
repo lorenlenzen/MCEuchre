@@ -274,6 +274,95 @@ checkpoints (`rebel_hq*.pt`) are incompatible and training must restart from
 scratch. See [`checkpoints/README.md`](../checkpoints/README.md) for the
 warm-start approach used to reduce that cost.
 
+### Milestone 3.6 — Match equity (score-conditioned value + CFR search) ✅
+
+Closed a gap flagged since early this session (see "Known gaps," below,
+prior to this milestone): every hand was trained and evaluated in total
+isolation from the race-to-10 match score. Real Euchre strategy is
+score-dependent — analogous to backgammon match equity or poker tournament
+ICM — e.g. a team one point from winning should strongly prefer a safe
+sure-thing over a high-variance loner attempt with equal or better *raw*
+expected points.
+
+**Key insight that shrank the scope.** Euchre's scoring has a structural
+property: *exactly one team scores per non-misdeal hand*. For any monotonic
+equity table (non-decreasing in own score, non-increasing in the
+opponent's — true of any correctly-built table), this guarantees the
+*ordinal* ranking of the 7 discrete hand outcomes under equity always matches
+their raw-point ranking, for a fixed starting score — provable by
+transitivity through the table, independent of its specific shape. That
+equivalence holds for *pure/deterministic* comparisons (`solve_value`'s
+double-dummy minimax, `rollout_value`'s `DEALER_DISCARD` enumeration — full
+information, no hidden-info mixing), so **their internal search stays
+completely raw-point-based, transposition table untouched** — this session's
+exact-solve performance work is fully preserved. It does *not* hold for
+comparisons of *expectations over mixed strategies* — exactly what CFR's
+regret matching does — because a saturating equity function can flip which
+option is better even when two options tie on raw expected points (the whole
+point of match equity: risk-shaping). So the real work was narrower than
+"rewrite every solver": convert to equity units only at the two boundaries
+where search compares expectations under uncertainty.
+
+**Components:**
+* **`rebel/match_equity.py`** (new) — `fit_hand_outcome_distribution()`
+  empirically measures the 7 discrete single-hand outcome frequencies via
+  `RuleBasedAgent` self-play (dealer-alternating, hence team-symmetric in
+  expectation — explicitly symmetrized post-fit since a *finite* empirical
+  sample won't measure exact symmetry even though the underlying process
+  has it, turning `win_prob(0,0)==0.5` into a provable invariant rather than
+  an approximate one). `build_equity_table()` value-iterates
+  `E(a,b)` = team0's match win probability to a fixed point over the
+  resulting absorbing Markov chain (misdeal is a genuine self-loop, handled
+  by iteration rather than analytic elimination). `MatchEquityModel` wraps
+  the table with `.equity_delta()` (a hand outcome → team0-signed
+  win-probability delta — zero-sum by construction, so it plugs directly
+  into the existing `util = [diff if team_of(p)==0 else -diff ...]` pattern)
+  and `.sample_score()` (draws a realistic starting score for self-play,
+  weighted by exact forward-visitation mass, not uniformly over the grid).
+* **`euchre/game.py`** — `EuchreState` gains `team0_score`/`team1_score`
+  (default 0, so every existing single-hand caller is unaffected).
+* **`euchre/infoset.py`** — `infoset_key` gets a team-relative `sc{mine},
+  {theirs}` component (so MCCFR's regret table shares statistics between
+  mirror-image situations — a team0 player up 7-4 and a team1 player up 7-4
+  are strategically identical); `observation_tensor`'s global block gets two
+  new score features. `OBS_SIZE` grew again, 394 → **396**. Zero changes
+  needed in `rebel/networks.py` — score is global-block-only, and the
+  suit-agnostic architecture's context trunk already takes `GLOBAL_DIM` from
+  the imported constant.
+* **`rebel/subgame.py` / `rebel/mccfr.py`** — an optional `equity_model`
+  param (default `None`, byte-identical prior behavior); when set, CFR's
+  *terminal* utility becomes an equity delta instead of raw points. Score is
+  fixed for a whole hand, so it's read once (`SubgameSolver`, from the root)
+  or straight off the terminal state itself (`MCCFRTrainer._utility`, no
+  separate threading needed).
+* **`rebel/pimc.py`** (`rollout_value`) — gains optional
+  `team0_score`/`team1_score`/`equity_model` params; when given, converts
+  its raw double-dummy result to equity units *once*, at the return
+  boundary. The internal recursive solve (`_rollout_value_raw`) is untouched
+  — same ordinal-equivalence argument.
+* **`rebel/train_rebel.py`** — `ReBeLTrainer` gains `equity_model`;
+  `_fresh_deal` samples a realistic score per hand when set, and passes it
+  through to `SubgameSolver` and `_grounded_value_sample`'s `rollout_value`
+  call. `scripts/train_parallel.py`/`train_scale.py`/`recalibrate_value.py`/
+  `warm_start_value.py` all take `--match-equity-table` (on by default,
+  loading the precomputed table) / `--no-match-equity` (opt out).
+
+**Verification** (`tests/test_match_equity.py`, 16 tests, all passing):
+table sanity (`win_prob(0,0)` exactly 0.5, boundaries, full-grid
+monotonicity, complementarity to float precision); `infoset_key` correctly
+distinguishes and team-relativizes score; `equity_model=None` produces
+byte-identical output to the pre-feature behavior in `SubgameSolver`,
+`MCCFRTrainer`, and `rollout_value`; and the core behavioral claim —
+at a score one point from winning, a certain +1 strictly beats a 50/50
+gamble between +2 and +0 under equity despite an exactly tied raw expected
+value (1.0 both) — proven directly from monotonicity, not just observed.
+End-to-end smoke-tested through the real multiprocess actor pipeline
+(`train_parallel.py`, 1 actor, ~433 hands, no errors).
+
+**Consequence:** another `OBS_SIZE` change, so checkpoints built on the
+suit-agnostic-only encoding (`rebel_sa_warm.pt`, `rebel_sa.pt`) also need
+regenerating/retraining under this milestone.
+
 #### Original Milestone 3 notes
 * Team subtleties: partners share reward but not information. Evaluate whether
   independent-per-player CFR suffices or whether a joint/correlated policy
@@ -305,22 +394,19 @@ warm-start approach used to reduce that cost.
 
 ### Known gaps (not yet scheduled)
 
-* **No score/match-equity awareness.** Every hand is trained and evaluated in
-  total isolation from the race-to-10 game score: `EuchreState` has no score
-  field, `infoset.py`'s observation encoding has no channel for one, and
-  every value target in the pipeline (`SubgameSolver` leaves, `PIMCAgent`
-  rollouts, the value net's regression target) is the hand's own raw point
-  differential. Real Euchre strategy is score-dependent (e.g. a team at 9
-  needing 1 more point shouldn't value a risky 4-point loner the way a team
-  at 6 needing to catch up should) — analogous to backgammon match equity or
-  poker tournament ICM. Fixing this needs: a score field threaded through
-  state/observation, `self_play_hand()` generalized into a match-shaped loop
-  that carries cumulative score across a sequence of hands, and a
-  score-conditioned equity model (table or small net) that leaf/root values
-  get converted through instead of raw point differential. Note this is
-  orthogonal to the current hand-level ladder benchmarks (`rebel/evaluate.py`
-  plays isolated hands with no score dimension) — it matters for real
-  race-to-10 play strength, not for the numbers the ladder currently reports.
+* ~~**No score/match-equity awareness.**~~ **Resolved — Milestone 3.6.**
+  `EuchreState`/observation now carry score, and `SubgameSolver`/
+  `MCCFRTrainer`/`rollout_value` convert to match-equity units when an
+  `equity_model` is supplied (opt-in via `--match-equity-table`, on by
+  default in the training scripts). One corner deliberately left alone:
+  `PIMCAgent` (a benchmark agent, not the trained pipeline) still defaults
+  to raw points — `rollout_value`'s new params are there if that's wanted
+  later, but its per-world cross-averaging would itself need equity
+  conversion for full consistency, not just passing the params through.
+  The hand-level ladder benchmarks (`rebel/evaluate.py`) remain
+  intentionally score-blind (0-0 every hand) — isolated single-hand
+  comparisons, not match play, so a neutral score is the right default
+  there, not a gap.
 * **Stick-the-dealer defaults off.** `ReBeLTrainer` now takes a
   `stick_the_dealer` param (plumbed through `--stick-the-dealer` in both
   `scripts/train_parallel.py` and `scripts/train_scale.py`, including the

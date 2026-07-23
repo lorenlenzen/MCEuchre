@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -37,6 +37,9 @@ from .evaluate import PointCountAgent
 from .networks import PolicyValueNet
 from .pimc import rollout_value
 from .subgame import SubgameSolver
+
+if TYPE_CHECKING:
+    from .match_equity import MatchEquityModel
 
 
 def legal_mask(state: EuchreState) -> np.ndarray:
@@ -87,7 +90,8 @@ class ReBeLTrainer:
                  stick_the_dealer: bool = False,
                  grad_clip_norm: float = 5.0,
                  round2_seed_frac: float = 0.0,
-                 value_ground_frac: float = 0.0) -> None:
+                 value_ground_frac: float = 0.0,
+                 equity_model: Optional["MatchEquityModel"] = None) -> None:
         self.net = net or PolicyValueNet()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         # Safety net, not a tuning knob: caps the gradient norm of any single
@@ -144,6 +148,15 @@ class ReBeLTrainer:
         # good for correcting gross miscalibration, not for fine policy
         # tuning. Off by default.
         self.value_ground_frac = value_ground_frac
+        # None (default) preserves exact prior behavior throughout this
+        # class: every deal starts 0-0, SubgameSolver gets no equity_model
+        # (raw point-differential CFR targets, unchanged), and
+        # _grounded_value_sample's rollout_value calls stay raw-point too.
+        # When set, self-play samples a realistic match-score context per
+        # hand (via equity_model.sample_score, weighted by how often that
+        # score actually arises) and CFR's own terminal utilities become
+        # equity-aware -- see rebel/match_equity.py and docs/rebel_design.md.
+        self.equity_model = equity_model
         self.num_worlds = num_worlds
         self.cfr_iterations = cfr_iterations
         self.buffer: List[Sample] = []
@@ -214,7 +227,10 @@ class ReBeLTrainer:
     # -- leaf value from the current network ---------------------------------
 
     def value_fn(self, state: EuchreState) -> float:
-        """Estimate team0 - team1 point differential at a subgame leaf."""
+        """Estimate a subgame leaf's value: team0 - team1 point differential,
+        or (when equity_model is set) a team0-signed match win-probability
+        delta -- whichever units the net is currently being trained to
+        predict, since this just reads its raw output."""
         return self.batch_value_fn([state])[0]
 
     def batch_value_fn(self, states: List[EuchreState]) -> List[float]:
@@ -225,9 +241,13 @@ class ReBeLTrainer:
     # -- self-play -----------------------------------------------------------
 
     def _fresh_deal(self) -> EuchreState:
+        team0_score = team1_score = 0
+        if self.equity_model is not None:
+            team0_score, team1_score = self.equity_model.sample_score(self.rng)
         return EuchreState.new_hand(
             dealer=self.rng.randint(0, 3),
-            stick_the_dealer=self.stick_the_dealer).deal(self.rng)
+            stick_the_dealer=self.stick_the_dealer,
+            team0_score=team0_score, team1_score=team1_score).deal(self.rng)
 
     # ORDER_1_THRESH (2.2) is where PointCountAgent itself calls -- 86% of
     # random first-actor hands already score under it (measured), so
@@ -285,7 +305,12 @@ class ReBeLTrainer:
         else:
             nxt = state.apply(OrderUp(alone=False))
 
-        v0 = rollout_value(nxt)  # exact -- all 4 hands already known
+        # exact -- all 4 hands already known; nxt already carries whatever
+        # score _fresh_deal sampled (apply()/clone() preserve it), so no
+        # separate sampling call is needed here.
+        v0 = rollout_value(nxt, team0_score=nxt.team0_score,
+                           team1_score=nxt.team1_score,
+                           equity_model=self.equity_model)
         leaf_player = nxt.current_player
         target = v0 if team_of(leaf_player) == 0 else -v0
         return Sample(
@@ -316,10 +341,14 @@ class ReBeLTrainer:
                 state, actor, num_worlds=self.num_worlds,
                 iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
                 batch_value_fn=self.batch_value_fn,
-                belief_model=self.belief_model, rng=self.rng)
+                belief_model=self.belief_model, equity_model=self.equity_model,
+                rng=self.rng)
             solver.run()
             policy = solver.root_policy()
-            root_val = solver.root_value()  # team0 - team1
+            # team0 - team1 raw points, or (equity_model set) a team0-signed
+            # match win-probability delta -- either way, root_val's units
+            # match whatever Sample.value trains the value head to predict.
+            root_val = solver.root_value()
 
             target = np.zeros(NUM_ACTIONS, dtype=np.float32)
             for a, p in policy.items():

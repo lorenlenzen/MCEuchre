@@ -23,12 +23,15 @@ training target for the policy net.
 from __future__ import annotations
 
 import random
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from euchre.actions import Action
 from euchre.game import EuchreState, team_of
 from euchre.infoset import infoset_key
 from .public_belief_state import sample_determinization
+
+if TYPE_CHECKING:
+    from .match_equity import MatchEquityModel
 
 # A value function maps a (fully-specified) state to an estimate of the hand's
 # team0 - team1 point differential. A batch value function does the same for a
@@ -100,6 +103,7 @@ class SubgameSolver:
                  value_fn: Optional[ValueFn] = None,
                  batch_value_fn: Optional[BatchValueFn] = None,
                  belief_model=None,
+                 equity_model: Optional["MatchEquityModel"] = None,
                  rng: Optional[random.Random] = None) -> None:
         if root.is_terminal() or root.current_player != actor:
             raise ValueError("Subgame root must be a decision node for actor")
@@ -108,6 +112,13 @@ class SubgameSolver:
         self.depth_limit = depth_limit
         self.value_fn = value_fn
         self.batch_value_fn = batch_value_fn
+        # Score can't change mid-hand, so it's fixed for this whole subgame --
+        # read once here rather than per-terminal-node. None (the default)
+        # preserves exact prior behavior (raw point-differential utility) for
+        # any caller that doesn't opt in (CFRSearchAgent, existing tests).
+        self.equity_model = equity_model
+        self.team0_score = root.team0_score
+        self.team1_score = root.team1_score
         self.rng = rng or random.Random()
         self.infosets: Dict[str, _Info] = {}
         if belief_model is not None:
@@ -130,7 +141,17 @@ class SubgameSolver:
     def _build(self, state: EuchreState, depth: int) -> _TNode:
         if state.is_terminal():
             r = state.returns()
-            diff = r[0] - r[1]
+            if self.equity_model is not None:
+                # CFR compares EXPECTATIONS over mixed strategies/hidden-info
+                # uncertainty, which is exactly where a saturating equity
+                # function can change which option is better -- unlike
+                # solve_value/rollout_value's pure double-dummy minimax
+                # (see rebel/match_equity.py's module docstring for why that
+                # can stay raw-point-based).
+                diff = self.equity_model.equity_delta(
+                    self.team0_score, self.team1_score, r[0], r[1])
+            else:
+                diff = r[0] - r[1]
             return _TNode(util=[diff if team_of(p) == 0 else -diff
                                 for p in range(4)])
         if self.depth_limit is not None and depth >= self.depth_limit:

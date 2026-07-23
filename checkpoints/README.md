@@ -1,6 +1,6 @@
 # ReBeL high-quality training checkpoint
 
-## ⚠️ `rebel_hq*.pt` / `rebel_hq_valuefix.pt` are stale (encoding changed)
+## ⚠️ Every checkpoint here is stale (encoding changed twice)
 
 Diagnosed this session: the trained policy head carried an arbitrary,
 hand-independent per-suit anchor in round-2 bidding (it would "Call Clubs"
@@ -12,12 +12,15 @@ fixed absolute slots with no shared parameters, and round-2 samples are only
 relative to the trump/up-card suit and makes `PolicyValueNet` a relational
 net with shared per-suit/per-card towers, so the two off-color suits are
 provably handled by identical weights (verified to float precision, not
-approximately). `OBS_SIZE` changed (249 → 394) and the network internals
-changed, so **every existing checkpoint here is incompatible** with the
-current code — loading one will fail on a shape mismatch. Train fresh; don't
-`--resume` from `rebel_hq*.pt`.
+approximately). `OBS_SIZE` changed **249 → 394**.
 
-## Speeding up a fresh run: value warm-start
+Then Milestone 3.6 (match equity — see below) added score to the observation
+too: `OBS_SIZE` changed **again, 394 → 396**. So `rebel_hq*.pt`
+(pre-3.5) *and* `rebel_sa*.pt` (3.5 but pre-3.6) are **both incompatible**
+with the current code — loading either fails on a shape mismatch. Train
+fresh; don't `--resume` from either family.
+
+## Speeding up a fresh run: value warm-start + match equity
 
 Random-init leaf values are noise, and `SubgameSolver`'s depth-limited CFR
 search reads leaf values from the net for everything beyond the search
@@ -32,13 +35,21 @@ warm-start attempt's failure (`warm_start_bidding.py` regressed the quiz
 validation) because it never touches a policy target at all. Policy heads
 stay at random init; self-play + CFR train those, same as before.
 
+Match equity (Milestone 3.6) is **on by default** in both scripts below —
+they load `rebel/match_equity_table.json`, building it first if it doesn't
+exist yet:
+
 ```
+python scripts/build_match_equity_table.py --out rebel/match_equity_table.json
 python scripts/warm_start_value.py --out checkpoints/rebel_sa_warm --samples 4000
 python scripts/train_parallel.py --resume checkpoints/rebel_sa_warm.pt \
   --actors 7 --minutes 900 --num-worlds 24 --cfr-iters 60 --depth-limit 6 \
   --bid-depth-limit 6 --full-depth-cards 2 --value-ground-frac 0.1 \
   --out checkpoints/rebel_sa
 ```
+
+Pass `--no-match-equity` to either script to train raw-point/score-blind
+instead (e.g. for an ablation comparison against a match-equity run).
 
 `--value-ground-frac` (see Milestone-3.5-adjacent work this session) mixes a
 steady trickle of the same kind of grounded sample into every live training
@@ -99,11 +110,11 @@ entry hundreds of times before eviction.
 ## Known gaps before investing in a long run
 
 See "Known gaps" in [`docs/rebel_design.md`](../docs/rebel_design.md) for
-the full detail. In short, this checkpoint's bidding net was trained with:
-* **no game-score awareness** -- every hand is isolated from the race-to-10
-  context, so its bidding thresholds can't do risk adjustment when trailing
-  or ahead. Still an open gap, needs real state/loop changes (see the design
-  doc), not just a flag.
+the full detail. In short, this checkpoint (`rebel_hq.pt`, pre-3.5/3.6) was
+trained with:
+* **no game-score awareness** -- resolved by Milestone 3.6 (match equity),
+  but only for checkpoints trained *after* that change; this one predates it
+  and its bidding thresholds do no risk adjustment when trailing or ahead.
 * **stick-the-dealer off** -- `--stick-the-dealer` now exists on both
   `train_parallel.py` and `train_scale.py` (plumbed through `ReBeLTrainer`
   and into periodic eval too), but it defaults off and `rebel_hq.pt` so far

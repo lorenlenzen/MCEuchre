@@ -9,6 +9,8 @@ we get a learning curve. Checkpoints the net and a JSON log.
 
 import argparse
 import json
+import os
+import sys
 import time
 
 import torch
@@ -16,6 +18,7 @@ import torch
 from rebel.train_rebel import ReBeLTrainer, ReBeLNetAgent
 from rebel.belief_model import BiddingBeliefModel
 from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
+from rebel.match_equity import MatchEquityModel
 
 
 def main() -> None:
@@ -57,16 +60,39 @@ def main() -> None:
                          "re-drifting the way it was found to have "
                          "(overestimating post-call outcomes by roughly "
                          "half a point to a full point) this session.")
+    ap.add_argument("--match-equity-table", type=str,
+                    default="rebel/match_equity_table.json",
+                    help="path to the precomputed match-equity table (see "
+                         "scripts/build_match_equity_table.py). See "
+                         "train_parallel.py's --match-equity-table for what "
+                         "this changes.")
+    ap.add_argument("--no-match-equity", action="store_true",
+                    help="disable match-equity awareness -- raw point-"
+                         "differential targets at a fixed 0-0 score.")
     ap.add_argument("--out", type=str, default="rebel_scale")
     ap.add_argument("--resume", type=str, default=None,
                     help="checkpoint .pt to warm-start the net from")
     args = ap.parse_args()
 
+    equity_model = None
+    if not args.no_match_equity:
+        if not os.path.exists(args.match_equity_table):
+            print(f"error: --match-equity-table {args.match_equity_table!r} "
+                  f"not found. Build it first:\n"
+                  f"    python scripts/build_match_equity_table.py "
+                  f"--out {args.match_equity_table}\n"
+                  f"or pass --no-match-equity to train without it.")
+            sys.exit(1)
+        equity_model = MatchEquityModel.load(args.match_equity_table)
+        print(f"match equity: on ({args.match_equity_table})")
+    else:
+        print("match equity: off (--no-match-equity)")
+
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
         depth_limit=args.depth_limit, bid_depth_limit=args.bid_depth_limit,
         full_depth_cards=args.full_depth_cards,
-        stick_the_dealer=args.stick_the_dealer,
+        stick_the_dealer=args.stick_the_dealer, equity_model=equity_model,
         grad_clip_norm=args.grad_clip_norm,
         round2_seed_frac=args.round2_seed_frac,
         value_ground_frac=args.value_ground_frac,

@@ -15,18 +15,31 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .match_equity import MatchEquityModel
 
 from euchre.actions import Action, action_to_index
 from euchre.game import EuchreState, team_of
 from euchre.infoset import infoset_key
 
 
-def _utility(state: EuchreState, player: int) -> float:
+def _utility(state: EuchreState, player: int,
+            equity_model: Optional["MatchEquityModel"] = None) -> float:
     r = state.returns()
     t = team_of(player)
+    if equity_model is not None:
+        # Score is fixed for a hand's whole duration, so the terminal
+        # state's own team0_score/team1_score fields ARE the pre-hand score
+        # -- no separate threading needed. See SubgameSolver._build for the
+        # same conversion and why it belongs here (comparing expectations
+        # under CFR's regret matching) and not in solve_value/rollout_value.
+        diff = equity_model.equity_delta(
+            state.team0_score, state.team1_score, r[0], r[1])
+        return diff if t == 0 else -diff
     return float(r[t] - r[1 - t])
 
 
@@ -60,9 +73,14 @@ class Node:
 
 class MCCFRTrainer:
     def __init__(self, stick_the_dealer: bool = False,
+                 equity_model: Optional["MatchEquityModel"] = None,
                  seed: int = 0) -> None:
         self.nodes: Dict[str, Node] = {}
         self.stick_the_dealer = stick_the_dealer
+        # None (default) preserves exact prior behavior -- raw point-
+        # differential utility, every hand starting 0-0 -- for scripts/
+        # ladder.py and any other caller that doesn't opt in.
+        self.equity_model = equity_model
         self.rng = random.Random(seed)
 
     def _node(self, state: EuchreState, player: int) -> Node:
@@ -75,7 +93,7 @@ class MCCFRTrainer:
 
     def _traverse(self, state: EuchreState, traverser: int) -> float:
         if state.is_terminal():
-            return _utility(state, traverser)
+            return _utility(state, traverser, self.equity_model)
         if state.is_chance():
             return self._traverse(state.deal(self.rng), traverser)
 
@@ -100,11 +118,23 @@ class MCCFRTrainer:
         return self._traverse(state.apply(legal[i]), traverser)
 
     def iterate(self, dealer: int | None = None) -> None:
-        """One MCCFR iteration: traverse once per player on a fresh deal."""
+        """One MCCFR iteration: traverse once per player on a fresh deal.
+
+        Dealer (when not fixed by the caller) and deal are already
+        independently resampled per traverser below -- each of the 4
+        traversals is its own fresh, independent hand, not 4 traversals of
+        one shared hand. Score is sampled the same way, per traverser, for
+        the same reason.
+        """
         for p in range(4):
             d = self.rng.randint(0, 3) if dealer is None else dealer
+            team0_score = team1_score = 0
+            if self.equity_model is not None:
+                team0_score, team1_score = self.equity_model.sample_score(self.rng)
             root = EuchreState.new_hand(dealer=d,
-                                        stick_the_dealer=self.stick_the_dealer)
+                                        stick_the_dealer=self.stick_the_dealer,
+                                        team0_score=team0_score,
+                                        team1_score=team1_score)
             self._traverse(root, p)
 
     def train(self, iterations: int, log_every: int = 0) -> None:

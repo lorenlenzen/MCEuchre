@@ -1,313 +1,102 @@
 [
   {
-    "elapsed_s": 146,
-    "samples": 265,
-    "hands_est": 20,
-    "buffer": 265,
-    "vs_random": 0.05,
-    "win_random": 0.56,
-    "vs_rule": -0.395,
-    "win_rule": 0.49,
+    "elapsed_s": 454,
+    "samples": 257,
+    "hands_est": 19,
+    "buffer": 257,
+    "vs_random": 0.745,
+    "win_random": 0.62,
+    "vs_rule": -0.635,
+    "win_rule": 0.24,
     "top_clusters": [
       {
         "key": [
           "PLAY"
         ],
-        "priority": 1.327,
-        "count": 216,
-        "sample_share": 0.7959
+        "priority": 1.306,
+        "count": 188,
+        "sample_share": 0.7392
       },
       {
         "key": [
           "DEALER_DISCARD"
         ],
-        "priority": 1.848,
-        "count": 20,
-        "sample_share": 0.087
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.72,
-        "count": 6,
-        "sample_share": 0.0252
-      },
-      {
-        "key": [
-          "bid1",
-          6
-        ],
-        "priority": 1.44,
-        "count": 5,
-        "sample_share": 0.0192
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 1.639,
-        "count": 4,
-        "sample_share": 0.0164
-      }
-    ]
-  },
-  {
-    "elapsed_s": 267,
-    "samples": 426,
-    "hands_est": 32,
-    "buffer": 426,
-    "vs_random": 0.34,
-    "win_random": 0.65,
-    "vs_rule": -0.265,
-    "win_rule": 0.52,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.363,
-        "count": 342,
-        "sample_share": 0.7938
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.718,
-        "count": 31,
-        "sample_share": 0.0808
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.233,
-        "count": 11,
-        "sample_share": 0.0243
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 1.605,
-        "count": 9,
-        "sample_share": 0.0227
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.852,
-        "count": 8,
-        "sample_share": 0.0216
-      }
-    ]
-  },
-  {
-    "elapsed_s": 388,
-    "samples": 568,
-    "hands_est": 43,
-    "buffer": 568,
-    "vs_random": -0.04,
-    "win_random": 0.53,
-    "vs_rule": -0.45,
-    "win_rule": 0.46,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.255,
-        "count": 449,
-        "sample_share": 0.7763
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.81,
-        "count": 41,
-        "sample_share": 0.0851
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.32,
-        "count": 15,
-        "sample_share": 0.0266
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 1.182,
-        "count": 14,
-        "sample_share": 0.0235
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.497,
-        "count": 10,
-        "sample_share": 0.0189
-      }
-    ]
-  },
-  {
-    "elapsed_s": 508,
-    "samples": 733,
-    "hands_est": 56,
-    "buffer": 733,
-    "vs_random": -0.005,
-    "win_random": 0.535,
-    "vs_rule": -0.485,
-    "win_rule": 0.46,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.313,
-        "count": 579,
-        "sample_share": 0.7845
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.656,
-        "count": 52,
-        "sample_share": 0.0791
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.537,
-        "count": 20,
-        "sample_share": 0.0293
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 1.162,
-        "count": 20,
-        "sample_share": 0.0255
+        "priority": 1.746,
+        "count": 19,
+        "sample_share": 0.0864
       },
       {
         "key": [
           "bid1",
           3
         ],
-        "priority": 1.102,
-        "count": 14,
-        "sample_share": 0.0174
-      }
-    ]
-  },
-  {
-    "elapsed_s": 628,
-    "samples": 883,
-    "hands_est": 67,
-    "buffer": 883,
-    "vs_random": 0.04,
-    "win_random": 0.525,
-    "vs_rule": -0.115,
-    "win_rule": 0.565,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.517,
-        "count": 690,
-        "sample_share": 0.7937
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.581,
-        "count": 62,
-        "sample_share": 0.0728
+        "priority": 1.042,
+        "count": 9,
+        "sample_share": 0.0316
       },
       {
         "key": [
           "bid1",
           2
+        ],
+        "priority": 0.981,
+        "count": 9,
+        "sample_share": 0.0307
+      },
+      {
+        "key": [
+          "bid1",
+          4
         ],
         "priority": 1.069,
-        "count": 27,
-        "sample_share": 0.0261
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.008,
-        "count": 27,
-        "sample_share": 0.0253
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.16,
-        "count": 19,
-        "sample_share": 0.0191
+        "count": 8,
+        "sample_share": 0.0285
       }
     ]
   },
   {
-    "elapsed_s": 748,
-    "samples": 1023,
-    "hands_est": 78,
-    "buffer": 1023,
-    "vs_random": 0.25,
-    "win_random": 0.57,
-    "vs_rule": -0.625,
-    "win_rule": 0.315,
+    "elapsed_s": 575,
+    "samples": 341,
+    "hands_est": 26,
+    "buffer": 341,
+    "vs_random": 1.025,
+    "win_random": 0.695,
+    "vs_rule": -0.705,
+    "win_rule": 0.21,
     "top_clusters": [
       {
         "key": [
           "PLAY"
         ],
-        "priority": 1.419,
-        "count": 800,
-        "sample_share": 0.7978
+        "priority": 1.063,
+        "count": 253,
+        "sample_share": 0.7343
       },
       {
         "key": [
           "DEALER_DISCARD"
         ],
-        "priority": 1.354,
-        "count": 71,
-        "sample_share": 0.0692
+        "priority": 1.705,
+        "count": 25,
+        "sample_share": 0.0919
       },
       {
         "key": [
           "bid1",
           2
         ],
-        "priority": 1.022,
-        "count": 34,
-        "sample_share": 0.0288
+        "priority": 0.925,
+        "count": 13,
+        "sample_share": 0.0352
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.043,
+        "count": 11,
+        "sample_share": 0.0316
       },
       {
         "key": [
@@ -315,1035 +104,971 @@
           1
         ],
         "priority": 0.914,
-        "count": 28,
-        "sample_share": 0.0224
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.964,
-        "count": 23,
-        "sample_share": 0.0189
-      }
-    ]
-  },
-  {
-    "elapsed_s": 868,
-    "samples": 1183,
-    "hands_est": 91,
-    "buffer": 1183,
-    "vs_random": 0.85,
-    "win_random": 0.645,
-    "vs_rule": -0.56,
-    "win_rule": 0.145,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.177,
-        "count": 918,
-        "sample_share": 0.7713
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.389,
-        "count": 81,
-        "sample_share": 0.0739
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.906,
-        "count": 39,
-        "sample_share": 0.0287
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 0.929,
-        "count": 34,
-        "sample_share": 0.0254
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.248,
-        "count": 29,
-        "sample_share": 0.0251
-      }
-    ]
-  },
-  {
-    "elapsed_s": 989,
-    "samples": 1376,
-    "hands_est": 105,
-    "buffer": 1376,
-    "vs_random": 0.9,
-    "win_random": 0.645,
-    "vs_rule": -0.56,
-    "win_rule": 0.11,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.375,
-        "count": 1062,
-        "sample_share": 0.7907
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.289,
-        "count": 94,
-        "sample_share": 0.0678
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.834,
-        "count": 49,
-        "sample_share": 0.0284
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.0,
-        "count": 39,
-        "sample_share": 0.0248
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.076,
-        "count": 35,
-        "sample_share": 0.0231
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1109,
-    "samples": 1482,
-    "hands_est": 114,
-    "buffer": 1482,
-    "vs_random": 0.915,
-    "win_random": 0.655,
-    "vs_rule": -0.585,
-    "win_rule": 0.14,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.078,
-        "count": 1143,
-        "sample_share": 0.776
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.894,
-        "count": 102,
-        "sample_share": 0.0631
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.828,
-        "count": 50,
-        "sample_share": 0.0298
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 0.931,
-        "count": 41,
-        "sample_share": 0.0259
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.359,
-        "count": 30,
-        "sample_share": 0.0229
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1229,
-    "samples": 1621,
-    "hands_est": 124,
-    "buffer": 1621,
-    "vs_random": 0.835,
-    "win_random": 0.645,
-    "vs_rule": -0.365,
-    "win_rule": 0.215,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.958,
-        "count": 1247,
-        "sample_share": 0.8107
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.316,
-        "count": 112,
-        "sample_share": 0.0597
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.394,
-        "count": 49,
+        "count": 10,
         "sample_share": 0.0269
+      }
+    ]
+  },
+  {
+    "elapsed_s": 695,
+    "samples": 430,
+    "hands_est": 33,
+    "buffer": 430,
+    "vs_random": 0.94,
+    "win_random": 0.655,
+    "vs_rule": -0.56,
+    "win_rule": 0.255,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.95,
+        "count": 319,
+        "sample_share": 0.7251
       },
       {
         "key": [
-          "bid1",
-          2
+          "DEALER_DISCARD"
         ],
-        "priority": 0.739,
-        "count": 54,
-        "sample_share": 0.0216
+        "priority": 1.67,
+        "count": 31,
+        "sample_share": 0.0935
       },
       {
         "key": [
           "bid1",
           1
         ],
-        "priority": 0.911,
-        "count": 45,
-        "sample_share": 0.02
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1349,
-    "samples": 1782,
-    "hands_est": 137,
-    "buffer": 1782,
-    "vs_random": 0.855,
-    "win_random": 0.64,
-    "vs_rule": -0.825,
-    "win_rule": 0.075,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.515,
-        "count": 1371,
-        "sample_share": 0.7968
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.326,
-        "count": 123,
-        "sample_share": 0.0669
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.167,
-        "count": 56,
-        "sample_share": 0.0286
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.709,
-        "count": 58,
-        "sample_share": 0.0231
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.297,
-        "count": 37,
-        "sample_share": 0.0199
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1470,
-    "samples": 1958,
-    "hands_est": 150,
-    "buffer": 1958,
-    "vs_random": 0.67,
-    "win_random": 0.58,
-    "vs_rule": -0.455,
-    "win_rule": 0.19,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.153,
-        "count": 1505,
-        "sample_share": 0.7798
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.164,
-        "count": 135,
-        "sample_share": 0.0703
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.882,
-        "count": 64,
-        "sample_share": 0.029
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 1.023,
-        "count": 52,
-        "sample_share": 0.0254
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.654,
-        "count": 61,
-        "sample_share": 0.0238
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1590,
-    "samples": 2094,
-    "hands_est": 161,
-    "buffer": 2094,
-    "vs_random": 0.65,
-    "win_random": 0.63,
-    "vs_rule": -0.075,
-    "win_rule": 0.385,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.373,
-        "count": 1604,
-        "sample_share": 0.8042
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.876,
-        "count": 144,
-        "sample_share": 0.0577
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.766,
-        "count": 74,
-        "sample_share": 0.0277
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.731,
-        "count": 68,
-        "sample_share": 0.0249
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.333,
-        "count": 46,
-        "sample_share": 0.0227
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1710,
-    "samples": 2219,
-    "hands_est": 170,
-    "buffer": 2219,
-    "vs_random": 0.515,
-    "win_random": 0.575,
-    "vs_rule": -0.355,
-    "win_rule": 0.325,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.209,
-        "count": 1691,
-        "sample_share": 0.7929
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.799,
-        "count": 153,
-        "sample_share": 0.0583
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.897,
-        "count": 73,
-        "sample_share": 0.0295
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.557,
-        "count": 80,
-        "sample_share": 0.0255
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.205,
-        "count": 53,
-        "sample_share": 0.0248
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1830,
-    "samples": 2372,
-    "hands_est": 182,
-    "buffer": 2372,
-    "vs_random": 0.665,
-    "win_random": 0.63,
-    "vs_rule": -0.13,
-    "win_rule": 0.34,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.307,
-        "count": 1804,
-        "sample_share": 0.7885
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.289,
-        "count": 164,
-        "sample_share": 0.0712
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.647,
-        "count": 86,
-        "sample_share": 0.0264
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.734,
-        "count": 79,
-        "sample_share": 0.0259
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.273,
-        "count": 57,
-        "sample_share": 0.0246
-      }
-    ]
-  },
-  {
-    "elapsed_s": 1951,
-    "samples": 2503,
-    "hands_est": 192,
-    "buffer": 2503,
-    "vs_random": 0.775,
-    "win_random": 0.635,
-    "vs_rule": -0.425,
-    "win_rule": 0.275,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 2.55,
-        "count": 1904,
-        "sample_share": 0.8468
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.685,
-        "count": 173,
-        "sample_share": 0.0399
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.866,
-        "count": 90,
-        "sample_share": 0.0233
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.857,
-        "count": 82,
-        "sample_share": 0.0211
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.221,
-        "count": 61,
-        "sample_share": 0.0188
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2071,
-    "samples": 2713,
-    "hands_est": 208,
-    "buffer": 2713,
-    "vs_random": 0.63,
-    "win_random": 0.615,
-    "vs_rule": -0.53,
-    "win_rule": 0.235,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.137,
-        "count": 2065,
-        "sample_share": 0.7842
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.835,
-        "count": 187,
-        "sample_share": 0.0609
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.728,
-        "count": 89,
-        "sample_share": 0.027
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.589,
-        "count": 97,
-        "sample_share": 0.0265
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 1.193,
-        "count": 66,
-        "sample_share": 0.0257
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2191,
-    "samples": 2857,
-    "hands_est": 219,
-    "buffer": 2857,
-    "vs_random": 0.645,
-    "win_random": 0.61,
-    "vs_rule": -0.08,
-    "win_rule": 0.445,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.457,
-        "count": 2175,
-        "sample_share": 0.8169
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.592,
-        "count": 198,
-        "sample_share": 0.0474
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.745,
-        "count": 102,
-        "sample_share": 0.0274
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.659,
-        "count": 95,
-        "sample_share": 0.024
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 0.889,
-        "count": 68,
-        "sample_share": 0.0199
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2311,
-    "samples": 3024,
-    "hands_est": 232,
-    "buffer": 3024,
-    "vs_random": 0.85,
-    "win_random": 0.69,
-    "vs_rule": -0.16,
-    "win_rule": 0.405,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 0.799,
-        "count": 2301,
-        "sample_share": 0.7449
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.478,
-        "count": 209,
-        "sample_share": 0.092
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.742,
-        "count": 101,
-        "sample_share": 0.0315
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.441,
-        "count": 106,
-        "sample_share": 0.0255
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 0.807,
-        "count": 77,
-        "sample_share": 0.025
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2431,
-    "samples": 3220,
-    "hands_est": 247,
-    "buffer": 3220,
-    "vs_random": 0.65,
-    "win_random": 0.61,
-    "vs_rule": -0.105,
-    "win_rule": 0.43,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.613,
-        "count": 2455,
-        "sample_share": 0.8046
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.574,
-        "count": 223,
-        "sample_share": 0.0722
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.18,
-        "count": 107,
-        "sample_share": 0.03
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.445,
-        "count": 110,
-        "sample_share": 0.0189
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 0.674,
-        "count": 81,
-        "sample_share": 0.0172
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2551,
-    "samples": 3379,
-    "hands_est": 259,
-    "buffer": 3379,
-    "vs_random": 0.72,
-    "win_random": 0.62,
-    "vs_rule": -0.34,
-    "win_rule": 0.32,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.01,
-        "count": 2575,
-        "sample_share": 0.7811
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.814,
-        "count": 234,
-        "sample_share": 0.0637
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.137,
-        "count": 111,
-        "sample_share": 0.0357
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.434,
-        "count": 114,
-        "sample_share": 0.0227
-      },
-      {
-        "key": [
-          "bid1",
-          1
-        ],
-        "priority": 0.712,
-        "count": 84,
-        "sample_share": 0.0214
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2672,
-    "samples": 3529,
-    "hands_est": 271,
-    "buffer": 3529,
-    "vs_random": 0.625,
-    "win_random": 0.61,
-    "vs_rule": -0.06,
-    "win_rule": 0.475,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.799,
-        "count": 2697,
-        "sample_share": 0.8313
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.687,
-        "count": 244,
-        "sample_share": 0.0465
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 0.855,
-        "count": 112,
-        "sample_share": 0.0238
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.74,
-        "count": 117,
-        "sample_share": 0.0231
-      },
-      {
-        "key": [
-          "bid1",
-          4
-        ],
-        "priority": 0.893,
-        "count": 88,
-        "sample_share": 0.0191
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2792,
-    "samples": 3692,
-    "hands_est": 284,
-    "buffer": 3692,
-    "vs_random": 0.75,
-    "win_random": 0.665,
-    "vs_rule": -0.03,
-    "win_rule": 0.52,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.052,
-        "count": 2818,
-        "sample_share": 0.7879
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.979,
-        "count": 255,
-        "sample_share": 0.0688
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.069,
-        "count": 117,
-        "sample_share": 0.033
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.764,
-        "count": 127,
-        "sample_share": 0.0303
+        "priority": 0.804,
+        "count": 16,
+        "sample_share": 0.0335
       },
       {
         "key": [
           "bid1",
           5
         ],
-        "priority": 1.34,
-        "count": 56,
-        "sample_share": 0.0177
-      }
-    ]
-  },
-  {
-    "elapsed_s": 2912,
-    "samples": 3834,
-    "hands_est": 294,
-    "buffer": 3834,
-    "vs_random": 0.645,
-    "win_random": 0.66,
-    "vs_rule": 0.02,
-    "win_rule": 0.57,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.202,
-        "count": 2932,
-        "sample_share": 0.7769
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 1.297,
-        "count": 266,
-        "sample_share": 0.0732
-      },
-      {
-        "key": [
-          "bid1",
-          2
-        ],
-        "priority": 0.948,
-        "count": 130,
-        "sample_share": 0.0306
-      },
-      {
-        "key": [
-          "bid1",
-          3
-        ],
-        "priority": 1.1,
-        "count": 117,
-        "sample_share": 0.0297
+        "priority": 1.041,
+        "count": 13,
+        "sample_share": 0.0309
       },
       {
         "key": [
           "bid1",
           4
         ],
-        "priority": 0.85,
-        "count": 94,
-        "sample_share": 0.0209
+        "priority": 1.162,
+        "count": 12,
+        "sample_share": 0.0302
       }
     ]
   },
   {
-    "elapsed_s": 3033,
-    "samples": 4018,
-    "hands_est": 309,
-    "buffer": 4018,
-    "vs_random": 0.83,
-    "win_random": 0.675,
-    "vs_rule": 0.0,
-    "win_rule": 0.55,
+    "elapsed_s": 815,
+    "samples": 514,
+    "hands_est": 39,
+    "buffer": 514,
+    "vs_random": 0.945,
+    "win_random": 0.67,
+    "vs_rule": -0.68,
+    "win_rule": 0.22,
     "top_clusters": [
       {
         "key": [
           "PLAY"
         ],
-        "priority": 1.072,
-        "count": 3076,
-        "sample_share": 0.7966
+        "priority": 1.222,
+        "count": 381,
+        "sample_share": 0.7661
       },
       {
         "key": [
           "DEALER_DISCARD"
         ],
-        "priority": 0.879,
-        "count": 278,
-        "sample_share": 0.0652
+        "priority": 1.508,
+        "count": 37,
+        "sample_share": 0.0826
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.332,
+        "count": 14,
+        "sample_share": 0.0294
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.708,
+        "count": 17,
+        "sample_share": 0.026
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.556,
+        "count": 17,
+        "sample_share": 0.0231
+      }
+    ]
+  },
+  {
+    "elapsed_s": 935,
+    "samples": 615,
+    "hands_est": 47,
+    "buffer": 615,
+    "vs_random": 1.045,
+    "win_random": 0.685,
+    "vs_rule": -0.525,
+    "win_rule": 0.28,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.989,
+        "count": 459,
+        "sample_share": 0.7433
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.471,
+        "count": 44,
+        "sample_share": 0.0869
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.443,
+        "count": 20,
+        "sample_share": 0.0391
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 1.15,
+        "count": 22,
+        "sample_share": 0.0384
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.833,
+        "count": 18,
+        "sample_share": 0.0268
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1056,
+    "samples": 747,
+    "hands_est": 57,
+    "buffer": 747,
+    "vs_random": 0.93,
+    "win_random": 0.655,
+    "vs_rule": -0.575,
+    "win_rule": 0.255,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.934,
+        "count": 564,
+        "sample_share": 0.7601
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.14,
+        "count": 53,
+        "sample_share": 0.0789
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.63,
+        "count": 26,
+        "sample_share": 0.0288
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.844,
+        "count": 22,
+        "sample_share": 0.0282
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.838,
+        "count": 22,
+        "sample_share": 0.0281
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1176,
+    "samples": 852,
+    "hands_est": 65,
+    "buffer": 852,
+    "vs_random": 0.855,
+    "win_random": 0.64,
+    "vs_rule": -0.615,
+    "win_rule": 0.25,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.091,
+        "count": 648,
+        "sample_share": 0.784
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.162,
+        "count": 60,
+        "sample_share": 0.0749
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.909,
+        "count": 27,
+        "sample_share": 0.0298
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.022,
+        "count": 22,
+        "sample_share": 0.0258
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.542,
+        "count": 29,
+        "sample_share": 0.0247
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1296,
+    "samples": 930,
+    "hands_est": 71,
+    "buffer": 930,
+    "vs_random": 0.8,
+    "win_random": 0.62,
+    "vs_rule": -0.33,
+    "win_rule": 0.325,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.874,
+        "count": 714,
+        "sample_share": 0.778
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.693,
+        "count": 66,
+        "sample_share": 0.064
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.086,
+        "count": 28,
+        "sample_share": 0.034
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.719,
+        "count": 30,
+        "sample_share": 0.0296
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.107,
+        "count": 22,
+        "sample_share": 0.027
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1416,
+    "samples": 980,
+    "hands_est": 75,
+    "buffer": 980,
+    "vs_random": 0.975,
+    "win_random": 0.675,
+    "vs_rule": -0.37,
+    "win_rule": 0.32,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.975,
+        "count": 752,
+        "sample_share": 0.7876
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.559,
+        "count": 70,
+        "sample_share": 0.0555
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.958,
+        "count": 32,
+        "sample_share": 0.0332
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.895,
+        "count": 29,
+        "sample_share": 0.0291
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.13,
+        "count": 24,
+        "sample_share": 0.027
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1537,
+    "samples": 1049,
+    "hands_est": 80,
+    "buffer": 1049,
+    "vs_random": 0.89,
+    "win_random": 0.645,
+    "vs_rule": -0.275,
+    "win_rule": 0.35,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.017,
+        "count": 802,
+        "sample_share": 0.7919
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.587,
+        "count": 75,
+        "sample_share": 0.0563
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.035,
+        "count": 33,
+        "sample_share": 0.0329
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.122,
+        "count": 27,
+        "sample_share": 0.028
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.662,
+        "count": 35,
+        "sample_share": 0.0279
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1657,
+    "samples": 1120,
+    "hands_est": 86,
+    "buffer": 1120,
+    "vs_random": 1.01,
+    "win_random": 0.685,
+    "vs_rule": -0.55,
+    "win_rule": 0.255,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.859,
+        "count": 857,
+        "sample_share": 0.7469
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.323,
+        "count": 80,
+        "sample_share": 0.0865
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.144,
+        "count": 37,
+        "sample_share": 0.0372
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.228,
+        "count": 29,
+        "sample_share": 0.0302
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.77,
+        "count": 35,
+        "sample_share": 0.0289
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1777,
+    "samples": 1196,
+    "hands_est": 92,
+    "buffer": 1196,
+    "vs_random": 0.795,
+    "win_random": 0.615,
+    "vs_rule": -0.3,
+    "win_rule": 0.315,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.932,
+        "count": 916,
+        "sample_share": 0.7696
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.288,
+        "count": 86,
+        "sample_share": 0.085
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.792,
+        "count": 40,
+        "sample_share": 0.031
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.177,
+        "count": 29,
+        "sample_share": 0.0274
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.599,
+        "count": 37,
+        "sample_share": 0.0249
+      }
+    ]
+  },
+  {
+    "elapsed_s": 1897,
+    "samples": 1263,
+    "hands_est": 97,
+    "buffer": 1263,
+    "vs_random": 0.86,
+    "win_random": 0.645,
+    "vs_rule": 0.13,
+    "win_rule": 0.445,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.701,
+        "count": 970,
+        "sample_share": 0.7348
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.241,
+        "count": 91,
+        "sample_share": 0.0917
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.794,
+        "count": 44,
+        "sample_share": 0.0355
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 1.026,
+        "count": 38,
+        "sample_share": 0.0348
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.166,
+        "count": 29,
+        "sample_share": 0.0283
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2018,
+    "samples": 1346,
+    "hands_est": 103,
+    "buffer": 1346,
+    "vs_random": 0.78,
+    "win_random": 0.635,
+    "vs_rule": 0.03,
+    "win_rule": 0.445,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.069,
+        "count": 1034,
+        "sample_share": 0.7778
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.214,
+        "count": 96,
+        "sample_share": 0.0769
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.923,
+        "count": 45,
+        "sample_share": 0.0315
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.818,
+        "count": 40,
+        "sample_share": 0.0263
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.045,
+        "count": 32,
+        "sample_share": 0.0238
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2138,
+    "samples": 1455,
+    "hands_est": 111,
+    "buffer": 1455,
+    "vs_random": 0.735,
+    "win_random": 0.625,
+    "vs_rule": 0.155,
+    "win_rule": 0.44,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.876,
+        "count": 1115,
+        "sample_share": 0.7754
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.964,
+        "count": 103,
+        "sample_share": 0.0751
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.756,
+        "count": 48,
+        "sample_share": 0.031
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.78,
+        "count": 43,
+        "sample_share": 0.0282
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.053,
+        "count": 34,
+        "sample_share": 0.0259
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2258,
+    "samples": 1510,
+    "hands_est": 116,
+    "buffer": 1510,
+    "vs_random": 0.8,
+    "win_random": 0.625,
+    "vs_rule": -0.35,
+    "win_rule": 0.305,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.212,
+        "count": 1157,
+        "sample_share": 0.8132
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.028,
+        "count": 107,
+        "sample_share": 0.0693
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.446,
+        "count": 49,
+        "sample_share": 0.0209
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.661,
+        "count": 39,
+        "sample_share": 0.0202
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.109,
+        "count": 29,
+        "sample_share": 0.0195
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2379,
+    "samples": 1599,
+    "hands_est": 123,
+    "buffer": 1599,
+    "vs_random": 0.545,
+    "win_random": 0.555,
+    "vs_rule": -0.255,
+    "win_rule": 0.35,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.386,
+        "count": 1221,
+        "sample_share": 0.8109
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.35,
+        "count": 113,
+        "sample_share": 0.0741
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.87,
+        "count": 50,
+        "sample_share": 0.0263
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.457,
+        "count": 34,
+        "sample_share": 0.0231
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.498,
+        "count": 45,
+        "sample_share": 0.0179
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2499,
+    "samples": 1676,
+    "hands_est": 128,
+    "buffer": 1676,
+    "vs_random": 0.68,
+    "win_random": 0.62,
+    "vs_rule": 0.015,
+    "win_rule": 0.5,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.688,
+        "count": 1279,
+        "sample_share": 0.73
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.496,
+        "count": 118,
+        "sample_share": 0.0993
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 1.374,
+        "count": 51,
+        "sample_share": 0.0411
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.894,
+        "count": 51,
+        "sample_share": 0.0332
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.12,
+        "count": 38,
+        "sample_share": 0.0277
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2619,
+    "samples": 1758,
+    "hands_est": 135,
+    "buffer": 1758,
+    "vs_random": 0.6,
+    "win_random": 0.615,
+    "vs_rule": 0.085,
+    "win_rule": 0.525,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.914,
+        "count": 1340,
+        "sample_share": 0.7873
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.561,
+        "count": 124,
+        "sample_share": 0.0571
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.0,
+        "count": 56,
+        "sample_share": 0.0344
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.82,
+        "count": 54,
+        "sample_share": 0.0301
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.018,
+        "count": 38,
+        "sample_share": 0.0236
+      }
+    ]
+  },
+  {
+    "elapsed_s": 2739,
+    "samples": 1848,
+    "hands_est": 142,
+    "buffer": 1848,
+    "vs_random": 0.775,
+    "win_random": 0.66,
+    "vs_rule": -0.025,
+    "win_rule": 0.5,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.819,
+        "count": 1404,
+        "sample_share": 0.7692
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.971,
+        "count": 130,
+        "sample_share": 0.0775
       },
       {
         "key": [
@@ -1351,117 +1076,181 @@
           3
         ],
         "priority": 0.712,
-        "count": 125,
-        "sample_share": 0.0264
+        "count": 62,
+        "sample_share": 0.0317
       },
       {
         "key": [
           "bid1",
-          2
+          1
         ],
-        "priority": 0.462,
-        "count": 133,
-        "sample_share": 0.0226
+        "priority": 0.6,
+        "count": 58,
+        "sample_share": 0.0272
       },
       {
         "key": [
           "bid1",
-          4
+          5
         ],
-        "priority": 0.79,
-        "count": 98,
-        "sample_share": 0.0218
+        "priority": 1.02,
+        "count": 39,
+        "sample_share": 0.0238
       }
     ]
   },
   {
-    "elapsed_s": 3153,
-    "samples": 4166,
-    "hands_est": 320,
-    "buffer": 4166,
-    "vs_random": 0.755,
-    "win_random": 0.66,
-    "vs_rule": 0.135,
-    "win_rule": 0.575,
+    "elapsed_s": 2860,
+    "samples": 1926,
+    "hands_est": 148,
+    "buffer": 1926,
+    "vs_random": 0.635,
+    "win_random": 0.585,
+    "vs_rule": -0.09,
+    "win_rule": 0.44,
     "top_clusters": [
       {
         "key": [
           "PLAY"
         ],
-        "priority": 0.948,
-        "count": 3192,
-        "sample_share": 0.7719
+        "priority": 0.745,
+        "count": 1466,
+        "sample_share": 0.7714
       },
       {
         "key": [
           "DEALER_DISCARD"
         ],
-        "priority": 1.319,
-        "count": 289,
-        "sample_share": 0.0824
+        "priority": 0.852,
+        "count": 136,
+        "sample_share": 0.0765
       },
       {
         "key": [
           "bid1",
           3
         ],
-        "priority": 0.695,
-        "count": 130,
-        "sample_share": 0.0269
+        "priority": 0.966,
+        "count": 64,
+        "sample_share": 0.0383
       },
       {
         "key": [
           "bid1",
-          4
+          1
         ],
-        "priority": 1.007,
-        "count": 101,
-        "sample_share": 0.0252
+        "priority": 0.472,
+        "count": 59,
+        "sample_share": 0.0247
       },
       {
         "key": [
           "bid1",
-          2
+          5
         ],
-        "priority": 0.563,
-        "count": 135,
-        "sample_share": 0.0252
+        "priority": 0.996,
+        "count": 39,
+        "sample_share": 0.0237
       }
     ]
   },
   {
-    "elapsed_s": 3273,
-    "samples": 4369,
-    "hands_est": 336,
-    "buffer": 4369,
-    "vs_random": 0.615,
-    "win_random": 0.625,
-    "vs_rule": -0.035,
-    "win_rule": 0.54,
+    "elapsed_s": 2980,
+    "samples": 2002,
+    "hands_est": 154,
+    "buffer": 2002,
+    "vs_random": 0.64,
+    "win_random": 0.605,
+    "vs_rule": -0.055,
+    "win_rule": 0.46,
     "top_clusters": [
       {
         "key": [
           "PLAY"
         ],
-        "priority": 1.154,
-        "count": 3354,
-        "sample_share": 0.8027
+        "priority": 0.872,
+        "count": 1522,
+        "sample_share": 0.7484
       },
       {
         "key": [
           "DEALER_DISCARD"
         ],
-        "priority": 1.157,
-        "count": 303,
-        "sample_share": 0.0726
+        "priority": 1.253,
+        "count": 141,
+        "sample_share": 0.0831
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 1.595,
+        "count": 61,
+        "sample_share": 0.0406
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.154,
+        "count": 65,
+        "sample_share": 0.0368
       },
       {
         "key": [
           "bid1",
           2
         ],
-        "priority": 0.573,
-        "count": 143,
+        "priority": 0.636,
+        "count": 55,
+        "sample_share": 0.0231
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3100,
+    "samples": 2049,
+    "hands_est": 157,
+    "buffer": 2049,
+    "vs_random": 0.635,
+    "win_random": 0.625,
+    "vs_rule": -0.04,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.036,
+        "count": 1557,
+        "sample_share": 0.7728
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.776,
+        "count": 144,
+        "sample_share": 0.0936
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.605,
+        "count": 69,
+        "sample_share": 0.0262
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.726,
+        "count": 58,
         "sample_share": 0.0241
       },
       {
@@ -1469,73 +1258,2869 @@
           "bid1",
           1
         ],
-        "priority": 0.671,
-        "count": 109,
-        "sample_share": 0.0199
+        "priority": 0.545,
+        "count": 62,
+        "sample_share": 0.0223
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3220,
+    "samples": 2084,
+    "hands_est": 160,
+    "buffer": 2084,
+    "vs_random": 0.745,
+    "win_random": 0.66,
+    "vs_rule": -0.09,
+    "win_rule": 0.48,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.17,
+        "count": 1582,
+        "sample_share": 0.8264
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.474,
+        "count": 147,
+        "sample_share": 0.0489
       },
       {
         "key": [
           "bid1",
           3
         ],
-        "priority": 0.348,
-        "count": 134,
-        "sample_share": 0.0176
-      }
-    ]
-  },
-  {
-    "elapsed_s": 3393,
-    "samples": 4539,
-    "hands_est": 349,
-    "buffer": 4539,
-    "vs_random": 0.91,
-    "win_random": 0.73,
-    "vs_rule": 0.065,
-    "win_rule": 0.57,
-    "top_clusters": [
-      {
-        "key": [
-          "PLAY"
-        ],
-        "priority": 1.29,
-        "count": 3490,
-        "sample_share": 0.8107
-      },
-      {
-        "key": [
-          "DEALER_DISCARD"
-        ],
-        "priority": 0.812,
-        "count": 315,
-        "sample_share": 0.0581
+        "priority": 0.409,
+        "count": 70,
+        "sample_share": 0.0216
       },
       {
         "key": [
           "bid1",
           4
         ],
-        "priority": 1.121,
-        "count": 108,
-        "sample_share": 0.0234
+        "priority": 0.982,
+        "count": 43,
+        "sample_share": 0.0206
       },
       {
         "key": [
           "bid1",
-          2
+          1
         ],
-        "priority": 0.536,
-        "count": 149,
-        "sample_share": 0.0223
+        "priority": 0.455,
+        "count": 63,
+        "sample_share": 0.0205
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3341,
+    "samples": 2171,
+    "hands_est": 167,
+    "buffer": 2171,
+    "vs_random": 0.39,
+    "win_random": 0.555,
+    "vs_rule": -0.175,
+    "win_rule": 0.45,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.042,
+        "count": 1649,
+        "sample_share": 0.7968
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.668,
+        "count": 153,
+        "sample_share": 0.0592
       },
       {
         "key": [
           "bid1",
           3
         ],
-        "priority": 0.603,
+        "priority": 0.91,
+        "count": 72,
+        "sample_share": 0.0325
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.63,
+        "count": 67,
+        "sample_share": 0.0252
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.124,
+        "count": 41,
+        "sample_share": 0.0206
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3461,
+    "samples": 2267,
+    "hands_est": 174,
+    "buffer": 2267,
+    "vs_random": 0.56,
+    "win_random": 0.615,
+    "vs_rule": -0.255,
+    "win_rule": 0.435,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.919,
+        "count": 1728,
+        "sample_share": 0.7892
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.716,
+        "count": 160,
+        "sample_share": 0.0645
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.783,
+        "count": 73,
+        "sample_share": 0.0308
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.778,
+        "count": 69,
+        "sample_share": 0.029
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.458,
+        "count": 64,
+        "sample_share": 0.0206
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3581,
+    "samples": 2368,
+    "hands_est": 182,
+    "buffer": 2368,
+    "vs_random": 0.69,
+    "win_random": 0.615,
+    "vs_rule": -0.315,
+    "win_rule": 0.36,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.801,
+        "count": 1809,
+        "sample_share": 0.7811
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.778,
+        "count": 167,
+        "sample_share": 0.071
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.737,
+        "count": 74,
+        "sample_share": 0.0306
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.595,
+        "count": 71,
+        "sample_share": 0.0264
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.508,
+        "count": 67,
+        "sample_share": 0.023
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3701,
+    "samples": 2497,
+    "hands_est": 192,
+    "buffer": 2497,
+    "vs_random": 0.675,
+    "win_random": 0.615,
+    "vs_rule": -0.005,
+    "win_rule": 0.42,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.04,
+        "count": 1913,
+        "sample_share": 0.8151
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.726,
+        "count": 177,
+        "sample_share": 0.063
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.6,
+        "count": 76,
+        "sample_share": 0.0246
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.821,
+        "count": 53,
+        "sample_share": 0.0201
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.378,
+        "count": 74,
+        "sample_share": 0.019
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3821,
+    "samples": 2589,
+    "hands_est": 199,
+    "buffer": 2589,
+    "vs_random": 0.6,
+    "win_random": 0.59,
+    "vs_rule": -0.01,
+    "win_rule": 0.43,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.901,
+        "count": 1985,
+        "sample_share": 0.8021
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.403,
+        "count": 184,
+        "sample_share": 0.0497
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.824,
+        "count": 77,
+        "sample_share": 0.0298
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.797,
+        "count": 70,
+        "sample_share": 0.0266
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.598,
+        "count": 77,
+        "sample_share": 0.0253
+      }
+    ]
+  },
+  {
+    "elapsed_s": 3942,
+    "samples": 2672,
+    "hands_est": 205,
+    "buffer": 2672,
+    "vs_random": 0.525,
+    "win_random": 0.58,
+    "vs_rule": -0.085,
+    "win_rule": 0.44,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.299,
+        "count": 2046,
+        "sample_share": 0.8081
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.214,
+        "count": 190,
+        "sample_share": 0.0726
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.6,
+        "count": 81,
+        "sample_share": 0.0217
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.679,
+        "count": 72,
+        "sample_share": 0.0206
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.455,
+        "count": 80,
+        "sample_share": 0.0187
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4062,
+    "samples": 2761,
+    "hands_est": 212,
+    "buffer": 2761,
+    "vs_random": 0.565,
+    "win_random": 0.595,
+    "vs_rule": -0.23,
+    "win_rule": 0.4,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.675,
+        "count": 2114,
+        "sample_share": 0.7665
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.8,
+        "count": 196,
+        "sample_share": 0.0774
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.602,
+        "count": 85,
+        "sample_share": 0.0291
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.549,
+        "count": 83,
+        "sample_share": 0.0271
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.902,
+        "count": 58,
+        "sample_share": 0.0243
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4183,
+    "samples": 2849,
+    "hands_est": 219,
+    "buffer": 2849,
+    "vs_random": 0.545,
+    "win_random": 0.58,
+    "vs_rule": 0.01,
+    "win_rule": 0.5,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.922,
+        "count": 2178,
+        "sample_share": 0.7858
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.013,
+        "count": 202,
+        "sample_share": 0.0764
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.782,
+        "count": 85,
+        "sample_share": 0.0282
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.597,
+        "count": 88,
+        "sample_share": 0.0255
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.869,
+        "count": 62,
+        "sample_share": 0.0217
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4303,
+    "samples": 2960,
+    "hands_est": 227,
+    "buffer": 2960,
+    "vs_random": 0.76,
+    "win_random": 0.635,
+    "vs_rule": 0.03,
+    "win_rule": 0.44,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.802,
+        "count": 2265,
+        "sample_share": 0.7641
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.523,
+        "count": 210,
+        "sample_share": 0.0976
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.714,
+        "count": 91,
+        "sample_share": 0.029
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.623,
+        "count": 90,
+        "sample_share": 0.0268
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.857,
+        "count": 64,
+        "sample_share": 0.0223
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4423,
+    "samples": 3080,
+    "hands_est": 236,
+    "buffer": 3080,
+    "vs_random": 0.795,
+    "win_random": 0.655,
+    "vs_rule": -0.015,
+    "win_rule": 0.455,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.996,
+        "count": 2363,
+        "sample_share": 0.7959
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.661,
+        "count": 219,
+        "sample_share": 0.0601
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 1.124,
+        "count": 92,
+        "sample_share": 0.0329
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 1.063,
+        "count": 85,
+        "sample_share": 0.0296
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.8,
+        "count": 92,
+        "sample_share": 0.0278
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4543,
+    "samples": 3120,
+    "hands_est": 240,
+    "buffer": 3120,
+    "vs_random": 0.535,
+    "win_random": 0.595,
+    "vs_rule": 0.12,
+    "win_rule": 0.505,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.232,
+        "count": 2393,
+        "sample_share": 0.8182
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.817,
+        "count": 222,
+        "sample_share": 0.0618
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.788,
+        "count": 93,
+        "sample_share": 0.0254
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.669,
+        "count": 86,
+        "sample_share": 0.0217
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.818,
+        "count": 69,
+        "sample_share": 0.0192
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4664,
+    "samples": 3224,
+    "hands_est": 248,
+    "buffer": 3224,
+    "vs_random": 0.615,
+    "win_random": 0.625,
+    "vs_rule": -0.035,
+    "win_rule": 0.465,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.975,
+        "count": 2471,
+        "sample_share": 0.8057
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.086,
+        "count": 229,
+        "sample_share": 0.0788
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.528,
+        "count": 100,
+        "sample_share": 0.024
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.476,
+        "count": 91,
+        "sample_share": 0.0207
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.287,
+        "count": 96,
+        "sample_share": 0.017
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4784,
+    "samples": 3305,
+    "hands_est": 254,
+    "buffer": 3305,
+    "vs_random": 0.59,
+    "win_random": 0.62,
+    "vs_rule": 0.01,
+    "win_rule": 0.5,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.015,
+        "count": 2536,
+        "sample_share": 0.8057
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.717,
+        "count": 234,
+        "sample_share": 0.0625
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.65,
+        "count": 101,
+        "sample_share": 0.0257
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.688,
+        "count": 92,
+        "sample_share": 0.0241
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.397,
+        "count": 101,
+        "sample_share": 0.0201
+      }
+    ]
+  },
+  {
+    "elapsed_s": 4904,
+    "samples": 3416,
+    "hands_est": 262,
+    "buffer": 3416,
+    "vs_random": 0.67,
+    "win_random": 0.605,
+    "vs_rule": -0.07,
+    "win_rule": 0.48,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.803,
+        "count": 2626,
+        "sample_share": 0.7698
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.441,
+        "count": 242,
+        "sample_share": 0.0951
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.614,
+        "count": 106,
+        "sample_share": 0.0272
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.764,
+        "count": 57,
+        "sample_share": 0.0248
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.362,
+        "count": 104,
+        "sample_share": 0.0205
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5025,
+    "samples": 3526,
+    "hands_est": 271,
+    "buffer": 3526,
+    "vs_random": 0.51,
+    "win_random": 0.595,
+    "vs_rule": -0.165,
+    "win_rule": 0.445,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.855,
+        "count": 2712,
+        "sample_share": 0.7731
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.342,
+        "count": 250,
+        "sample_share": 0.0893
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.92,
+        "count": 106,
+        "sample_share": 0.0314
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.691,
+        "count": 109,
+        "sample_share": 0.0279
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.427,
+        "count": 100,
+        "sample_share": 0.0201
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5145,
+    "samples": 3579,
+    "hands_est": 275,
+    "buffer": 3579,
+    "vs_random": 0.635,
+    "win_random": 0.625,
+    "vs_rule": 0.13,
+    "win_rule": 0.535,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.339,
+        "count": 2754,
+        "sample_share": 0.8158
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.022,
+        "count": 254,
+        "sample_share": 0.0657
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.649,
+        "count": 110,
+        "sample_share": 0.0227
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.73,
+        "count": 100,
+        "sample_share": 0.0219
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.036,
+        "count": 80,
+        "sample_share": 0.0208
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5265,
+    "samples": 3689,
+    "hands_est": 283,
+    "buffer": 3689,
+    "vs_random": 0.66,
+    "win_random": 0.62,
+    "vs_rule": 0.125,
+    "win_rule": 0.495,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.773,
+        "count": 2833,
+        "sample_share": 0.7965
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.721,
+        "count": 261,
+        "sample_share": 0.0708
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.616,
+        "count": 114,
+        "sample_share": 0.0286
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.713,
+        "count": 85,
+        "sample_share": 0.0229
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 0.987,
+        "count": 64,
+        "sample_share": 0.0203
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5386,
+    "samples": 3776,
+    "hands_est": 290,
+    "buffer": 3776,
+    "vs_random": 0.655,
+    "win_random": 0.615,
+    "vs_rule": 0.15,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.969,
+        "count": 2904,
+        "sample_share": 0.8181
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.485,
+        "count": 267,
+        "sample_share": 0.0532
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.764,
+        "count": 103,
+        "sample_share": 0.0258
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.419,
+        "count": 113,
+        "sample_share": 0.0209
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.713,
+        "count": 86,
+        "sample_share": 0.0208
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5506,
+    "samples": 3922,
+    "hands_est": 301,
+    "buffer": 3922,
+    "vs_random": 0.385,
+    "win_random": 0.575,
+    "vs_rule": 0.04,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.719,
+        "count": 3024,
+        "sample_share": 0.7889
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.734,
+        "count": 278,
+        "sample_share": 0.0733
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.66,
+        "count": 117,
+        "sample_share": 0.0292
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.595,
+        "count": 115,
+        "sample_share": 0.0273
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.37,
+        "count": 105,
+        "sample_share": 0.0197
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5626,
+    "samples": 4017,
+    "hands_est": 309,
+    "buffer": 4017,
+    "vs_random": 0.59,
+    "win_random": 0.6,
+    "vs_rule": 0.085,
+    "win_rule": 0.475,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.689,
+        "count": 3103,
+        "sample_share": 0.7505
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.778,
+        "count": 286,
+        "sample_share": 0.1111
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.97,
+        "count": 117,
+        "sample_share": 0.0336
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.478,
+        "count": 118,
+        "sample_share": 0.0238
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.604,
+        "count": 90,
+        "sample_share": 0.0204
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5746,
+    "samples": 4102,
+    "hands_est": 315,
+    "buffer": 4102,
+    "vs_random": 0.7,
+    "win_random": 0.625,
+    "vs_rule": 0.175,
+    "win_rule": 0.495,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.998,
+        "count": 3173,
+        "sample_share": 0.8101
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.683,
+        "count": 292,
+        "sample_share": 0.0616
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.985,
+        "count": 119,
+        "sample_share": 0.0302
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 1.045,
+        "count": 108,
+        "sample_share": 0.0282
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.274,
+        "count": 121,
+        "sample_share": 0.0162
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5866,
+    "samples": 4194,
+    "hands_est": 322,
+    "buffer": 4194,
+    "vs_random": 0.745,
+    "win_random": 0.655,
+    "vs_rule": 0.21,
+    "win_rule": 0.56,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.081,
+        "count": 3250,
+        "sample_share": 0.8271
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.661,
+        "count": 299,
+        "sample_share": 0.0595
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.528,
+        "count": 121,
+        "sample_share": 0.0215
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.427,
+        "count": 121,
+        "sample_share": 0.0194
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.408,
+        "count": 109,
+        "sample_share": 0.017
+      }
+    ]
+  },
+  {
+    "elapsed_s": 5986,
+    "samples": 4285,
+    "hands_est": 329,
+    "buffer": 4285,
+    "vs_random": 0.805,
+    "win_random": 0.675,
+    "vs_rule": 0.27,
+    "win_rule": 0.565,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.787,
+        "count": 3326,
+        "sample_share": 0.7843
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.875,
+        "count": 306,
+        "sample_share": 0.0761
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.721,
+        "count": 123,
+        "sample_share": 0.0278
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.529,
+        "count": 123,
+        "sample_share": 0.0238
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.759,
+        "count": 92,
+        "sample_share": 0.0213
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6107,
+    "samples": 4364,
+    "hands_est": 335,
+    "buffer": 4364,
+    "vs_random": 0.855,
+    "win_random": 0.685,
+    "vs_rule": 0.255,
+    "win_rule": 0.54,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.783,
+        "count": 3390,
+        "sample_share": 0.7979
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.597,
+        "count": 312,
+        "sample_share": 0.0641
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.617,
+        "count": 124,
+        "sample_share": 0.0259
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.71,
+        "count": 112,
+        "sample_share": 0.0251
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.467,
+        "count": 126,
+        "sample_share": 0.0229
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6227,
+    "samples": 4485,
+    "hands_est": 345,
+    "buffer": 4485,
+    "vs_random": 0.9,
+    "win_random": 0.69,
+    "vs_rule": -0.075,
+    "win_rule": 0.47,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.881,
+        "count": 3491,
+        "sample_share": 0.798
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.988,
+        "count": 321,
+        "sample_share": 0.0777
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.573,
+        "count": 126,
+        "sample_share": 0.0232
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.627,
+        "count": 114,
+        "sample_share": 0.022
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.44,
+        "count": 126,
+        "sample_share": 0.0204
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6347,
+    "samples": 4552,
+    "hands_est": 350,
+    "buffer": 4552,
+    "vs_random": 0.805,
+    "win_random": 0.66,
+    "vs_rule": 0.015,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.789,
+        "count": 3542,
+        "sample_share": 0.809
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.492,
+        "count": 326,
+        "sample_share": 0.0588
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.541,
+        "count": 127,
+        "sample_share": 0.024
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.481,
+        "count": 127,
+        "sample_share": 0.0226
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.847,
+        "count": 95,
+        "sample_share": 0.0225
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6467,
+    "samples": 4642,
+    "hands_est": 357,
+    "buffer": 4642,
+    "vs_random": 0.495,
+    "win_random": 0.6,
+    "vs_rule": 0.07,
+    "win_rule": 0.52,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.654,
+        "count": 3605,
+        "sample_share": 0.7869
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.609,
+        "count": 331,
+        "sample_share": 0.0697
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.779,
+        "count": 119,
+        "sample_share": 0.0284
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.481,
+        "count": 133,
+        "sample_share": 0.0249
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.677,
+        "count": 98,
+        "sample_share": 0.0218
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6587,
+    "samples": 4743,
+    "hands_est": 364,
+    "buffer": 4743,
+    "vs_random": 0.58,
+    "win_random": 0.625,
+    "vs_rule": -0.12,
+    "win_rule": 0.48,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.04,
+        "count": 3683,
+        "sample_share": 0.8081
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.889,
+        "count": 338,
+        "sample_share": 0.0686
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.708,
+        "count": 136,
+        "sample_share": 0.0246
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.699,
+        "count": 125,
+        "sample_share": 0.0225
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.598,
+        "count": 132,
+        "sample_share": 0.022
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6708,
+    "samples": 4822,
+    "hands_est": 370,
+    "buffer": 4822,
+    "vs_random": 0.705,
+    "win_random": 0.66,
+    "vs_rule": 0.045,
+    "win_rule": 0.5,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.844,
+        "count": 3744,
+        "sample_share": 0.7861
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.191,
+        "count": 343,
+        "sample_share": 0.0855
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.72,
+        "count": 135,
+        "sample_share": 0.0262
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.572,
+        "count": 137,
+        "sample_share": 0.0237
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.46,
+        "count": 129,
+        "sample_share": 0.02
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6828,
+    "samples": 4884,
+    "hands_est": 375,
+    "buffer": 4884,
+    "vs_random": 0.79,
+    "win_random": 0.675,
+    "vs_rule": 0.315,
+    "win_rule": 0.545,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.736,
+        "count": 3793,
+        "sample_share": 0.7818
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.764,
+        "count": 347,
+        "sample_share": 0.0729
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.112,
+        "count": 139,
+        "sample_share": 0.0352
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.924,
+        "count": 136,
+        "sample_share": 0.0314
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.483,
+        "count": 132,
+        "sample_share": 0.022
+      }
+    ]
+  },
+  {
+    "elapsed_s": 6948,
+    "samples": 4928,
+    "hands_est": 379,
+    "buffer": 4928,
+    "vs_random": 0.725,
+    "win_random": 0.615,
+    "vs_rule": 0.125,
+    "win_rule": 0.51,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.786,
+        "count": 3824,
+        "sample_share": 0.7856
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.974,
+        "count": 350,
+        "sample_share": 0.08
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 1.048,
+        "count": 135,
+        "sample_share": 0.032
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.178,
+        "count": 87,
+        "sample_share": 0.0219
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.407,
+        "count": 136,
+        "sample_share": 0.0201
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7069,
+    "samples": 5002,
+    "hands_est": 384,
+    "buffer": 5002,
+    "vs_random": 0.805,
+    "win_random": 0.655,
+    "vs_rule": 0.175,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.88,
+        "count": 3876,
+        "sample_share": 0.8144
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.525,
+        "count": 355,
+        "sample_share": 0.0576
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.767,
+        "count": 142,
+        "sample_share": 0.0279
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.571,
+        "count": 138,
+        "sample_share": 0.0234
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 0.982,
+        "count": 90,
+        "sample_share": 0.02
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7189,
+    "samples": 5088,
+    "hands_est": 391,
+    "buffer": 5088,
+    "vs_random": 0.755,
+    "win_random": 0.665,
+    "vs_rule": 0.125,
+    "win_rule": 0.515,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.925,
+        "count": 3938,
+        "sample_share": 0.8054
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.442,
+        "count": 360,
+        "sample_share": 0.0509
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.841,
+        "count": 144,
+        "sample_share": 0.0281
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.795,
+        "count": 92,
+        "sample_share": 0.0262
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.59,
         "count": 140,
+        "sample_share": 0.0229
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7309,
+    "samples": 5199,
+    "hands_est": 399,
+    "buffer": 5199,
+    "vs_random": 0.33,
+    "win_random": 0.575,
+    "vs_rule": -0.05,
+    "win_rule": 0.52,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.942,
+        "count": 4015,
+        "sample_share": 0.783
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.289,
+        "count": 368,
+        "sample_share": 0.0839
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.032,
+        "count": 152,
+        "sample_share": 0.031
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.607,
+        "count": 152,
+        "sample_share": 0.0238
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.531,
+        "count": 142,
+        "sample_share": 0.0208
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7429,
+    "samples": 5314,
+    "hands_est": 408,
+    "buffer": 5314,
+    "vs_random": 0.705,
+    "win_random": 0.63,
+    "vs_rule": -0.015,
+    "win_rule": 0.505,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.986,
+        "count": 4096,
+        "sample_share": 0.7961
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.996,
+        "count": 374,
+        "sample_share": 0.0731
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.725,
+        "count": 161,
+        "sample_share": 0.0268
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.713,
+        "count": 147,
+        "sample_share": 0.0243
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.538,
+        "count": 160,
+        "sample_share": 0.023
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7550,
+    "samples": 5409,
+    "hands_est": 416,
+    "buffer": 5409,
+    "vs_random": 0.81,
+    "win_random": 0.64,
+    "vs_rule": 0.245,
+    "win_rule": 0.535,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.981,
+        "count": 4167,
+        "sample_share": 0.7971
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.998,
+        "count": 381,
+        "sample_share": 0.0735
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.792,
+        "count": 166,
+        "sample_share": 0.0285
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.097,
+        "count": 110,
         "sample_share": 0.0222
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.348,
+        "count": 164,
+        "sample_share": 0.0187
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7670,
+    "samples": 5523,
+    "hands_est": 424,
+    "buffer": 5523,
+    "vs_random": 0.95,
+    "win_random": 0.695,
+    "vs_rule": 0.07,
+    "win_rule": 0.485,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.946,
+        "count": 4256,
+        "sample_share": 0.8292
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.322,
+        "count": 387,
+        "sample_share": 0.044
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.723,
+        "count": 171,
+        "sample_share": 0.0291
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.529,
+        "count": 153,
+        "sample_share": 0.0223
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 0.833,
+        "count": 96,
+        "sample_share": 0.0176
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7791,
+    "samples": 5664,
+    "hands_est": 435,
+    "buffer": 5664,
+    "vs_random": 0.83,
+    "win_random": 0.665,
+    "vs_rule": 0.195,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.16,
+        "count": 4372,
+        "sample_share": 0.816
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.958,
+        "count": 396,
+        "sample_share": 0.0672
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.827,
+        "count": 174,
+        "sample_share": 0.0274
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.661,
+        "count": 171,
+        "sample_share": 0.0241
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.397,
+        "count": 157,
+        "sample_share": 0.0171
+      }
+    ]
+  },
+  {
+    "elapsed_s": 7911,
+    "samples": 5779,
+    "hands_est": 444,
+    "buffer": 5779,
+    "vs_random": 0.67,
+    "win_random": 0.635,
+    "vs_rule": 0.16,
+    "win_rule": 0.52,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.848,
+        "count": 4463,
+        "sample_share": 0.7961
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.669,
+        "count": 404,
+        "sample_share": 0.064
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.748,
+        "count": 171,
+        "sample_share": 0.0287
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.532,
+        "count": 177,
+        "sample_share": 0.025
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.499,
+        "count": 163,
+        "sample_share": 0.0223
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8031,
+    "samples": 5912,
+    "hands_est": 454,
+    "buffer": 5912,
+    "vs_random": 0.795,
+    "win_random": 0.645,
+    "vs_rule": 0.11,
+    "win_rule": 0.495,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.54,
+        "count": 4573,
+        "sample_share": 0.8433
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.798,
+        "count": 414,
+        "sample_share": 0.055
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.586,
+        "count": 181,
+        "sample_share": 0.0206
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.539,
+        "count": 171,
+        "sample_share": 0.0187
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.422,
+        "count": 167,
+        "sample_share": 0.0161
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8151,
+    "samples": 6044,
+    "hands_est": 464,
+    "buffer": 6044,
+    "vs_random": 0.675,
+    "win_random": 0.62,
+    "vs_rule": 0.265,
+    "win_rule": 0.595,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.007,
+        "count": 4682,
+        "sample_share": 0.8214
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.589,
+        "count": 424,
+        "sample_share": 0.0569
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.546,
+        "count": 185,
+        "sample_share": 0.0239
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.489,
+        "count": 172,
+        "sample_share": 0.021
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.437,
+        "count": 170,
+        "sample_share": 0.0197
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8271,
+    "samples": 6175,
+    "hands_est": 475,
+    "buffer": 6175,
+    "vs_random": 0.645,
+    "win_random": 0.61,
+    "vs_rule": 0.25,
+    "win_rule": 0.53,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.752,
+        "count": 4791,
+        "sample_share": 0.8205
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.241,
+        "count": 434,
+        "sample_share": 0.0421
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.589,
+        "count": 175,
+        "sample_share": 0.0265
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.501,
+        "count": 186,
+        "sample_share": 0.026
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.469,
+        "count": 171,
+        "sample_share": 0.0231
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8392,
+    "samples": 6316,
+    "hands_est": 485,
+    "buffer": 6316,
+    "vs_random": 0.805,
+    "win_random": 0.645,
+    "vs_rule": 0.24,
+    "win_rule": 0.57,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.933,
+        "count": 4910,
+        "sample_share": 0.7983
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.199,
+        "count": 445,
+        "sample_share": 0.082
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.576,
+        "count": 178,
+        "sample_share": 0.0227
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.495,
+        "count": 188,
+        "sample_share": 0.0223
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.003,
+        "count": 121,
+        "sample_share": 0.0204
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8512,
+    "samples": 6470,
+    "hands_est": 497,
+    "buffer": 6470,
+    "vs_random": 0.755,
+    "win_random": 0.665,
+    "vs_rule": 0.375,
+    "win_rule": 0.585,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.003,
+        "count": 5039,
+        "sample_share": 0.8349
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.28,
+        "count": 457,
+        "sample_share": 0.0401
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 1.131,
+        "count": 191,
+        "sample_share": 0.0336
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.42,
+        "count": 182,
+        "sample_share": 0.0195
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 0.798,
+        "count": 122,
+        "sample_share": 0.018
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8632,
+    "samples": 6633,
+    "hands_est": 510,
+    "buffer": 6633,
+    "vs_random": 0.7,
+    "win_random": 0.65,
+    "vs_rule": 0.28,
+    "win_rule": 0.59,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.13,
+        "count": 5174,
+        "sample_share": 0.8337
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.669,
+        "count": 469,
+        "sample_share": 0.0582
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.617,
+        "count": 194,
+        "sample_share": 0.0231
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.513,
+        "count": 185,
+        "sample_share": 0.0201
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 0.887,
+        "count": 110,
+        "sample_share": 0.0157
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8752,
+    "samples": 6761,
+    "hands_est": 520,
+    "buffer": 6761,
+    "vs_random": 0.62,
+    "win_random": 0.63,
+    "vs_rule": 0.2,
+    "win_rule": 0.585,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.245,
+        "count": 5282,
+        "sample_share": 0.8387
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.815,
+        "count": 478,
+        "sample_share": 0.0614
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.452,
+        "count": 195,
+        "sample_share": 0.0187
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.514,
+        "count": 180,
+        "sample_share": 0.0184
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.451,
+        "count": 187,
+        "sample_share": 0.0179
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8873,
+    "samples": 6886,
+    "hands_est": 529,
+    "buffer": 6886,
+    "vs_random": 0.64,
+    "win_random": 0.66,
+    "vs_rule": -0.01,
+    "win_rule": 0.525,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.551,
+        "count": 5382,
+        "sample_share": 0.8406
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.927,
+        "count": 487,
+        "sample_share": 0.0588
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.683,
+        "count": 198,
+        "sample_share": 0.0205
+      },
+      {
+        "key": [
+          "bid1",
+          5
+        ],
+        "priority": 1.458,
+        "count": 112,
+        "sample_share": 0.017
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.511,
+        "count": 184,
+        "sample_share": 0.0165
+      }
+    ]
+  },
+  {
+    "elapsed_s": 8993,
+    "samples": 7051,
+    "hands_est": 542,
+    "buffer": 7051,
+    "vs_random": 0.49,
+    "win_random": 0.61,
+    "vs_rule": -0.115,
+    "win_rule": 0.49,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.715,
+        "count": 5518,
+        "sample_share": 0.7949
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.563,
+        "count": 498,
+        "sample_share": 0.0636
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.805,
+        "count": 190,
+        "sample_share": 0.029
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.669,
+        "count": 193,
+        "sample_share": 0.0269
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.452,
+        "count": 199,
+        "sample_share": 0.0228
+      }
+    ]
+  },
+  {
+    "elapsed_s": 9113,
+    "samples": 7194,
+    "hands_est": 553,
+    "buffer": 7194,
+    "vs_random": 0.82,
+    "win_random": 0.675,
+    "vs_rule": -0.01,
+    "win_rule": 0.51,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.067,
+        "count": 5640,
+        "sample_share": 0.8154
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.922,
+        "count": 508,
+        "sample_share": 0.0683
+      },
+      {
+        "key": [
+          "bid1",
+          3
+        ],
+        "priority": 0.76,
+        "count": 199,
+        "sample_share": 0.0243
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.667,
+        "count": 193,
+        "sample_share": 0.0221
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.527,
+        "count": 194,
+        "sample_share": 0.0197
+      }
+    ]
+  },
+  {
+    "elapsed_s": 9233,
+    "samples": 7305,
+    "hands_est": 561,
+    "buffer": 7305,
+    "vs_random": 1.015,
+    "win_random": 0.725,
+    "vs_rule": 0.195,
+    "win_rule": 0.55,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 1.103,
+        "count": 5725,
+        "sample_share": 0.8085
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 1.273,
+        "count": 516,
+        "sample_share": 0.0783
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.705,
+        "count": 195,
+        "sample_share": 0.022
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.61,
+        "count": 198,
+        "sample_share": 0.0208
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.013,
+        "count": 129,
+        "sample_share": 0.0175
+      }
+    ]
+  },
+  {
+    "elapsed_s": 9353,
+    "samples": 7377,
+    "hands_est": 567,
+    "buffer": 7377,
+    "vs_random": 0.81,
+    "win_random": 0.685,
+    "vs_rule": 0.22,
+    "win_rule": 0.6,
+    "top_clusters": [
+      {
+        "key": [
+          "PLAY"
+        ],
+        "priority": 0.664,
+        "count": 5780,
+        "sample_share": 0.7901
+      },
+      {
+        "key": [
+          "DEALER_DISCARD"
+        ],
+        "priority": 0.598,
+        "count": 521,
+        "sample_share": 0.0676
+      },
+      {
+        "key": [
+          "bid1",
+          2
+        ],
+        "priority": 0.86,
+        "count": 198,
+        "sample_share": 0.0308
+      },
+      {
+        "key": [
+          "bid1",
+          4
+        ],
+        "priority": 1.741,
+        "count": 129,
+        "sample_share": 0.0285
+      },
+      {
+        "key": [
+          "bid1",
+          1
+        ],
+        "priority": 0.371,
+        "count": 200,
+        "sample_share": 0.0204
       }
     ]
   }

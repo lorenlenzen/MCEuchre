@@ -40,7 +40,9 @@ below, not just assumed.
 """
 
 import argparse
+import os
 import random
+import sys
 
 import numpy as np
 import torch
@@ -48,6 +50,7 @@ import torch
 from euchre.actions import Call, OrderUp, Pass
 from euchre.game import Phase, team_of
 from euchre.infoset import observation_tensor
+from rebel.match_equity import MatchEquityModel
 from rebel.networks import PolicyValueNet
 from rebel.pimc import rollout_value
 from rebel.train_rebel import ReBeLTrainer
@@ -97,8 +100,9 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
 
 
 def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
-                  stick_the_dealer=False):
-    helper = ReBeLTrainer(seed=seed, stick_the_dealer=stick_the_dealer)  # only for _fresh_deal
+                  stick_the_dealer=False, equity_model=None):
+    helper = ReBeLTrainer(seed=seed, stick_the_dealer=stick_the_dealer,
+                          equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
     while len(out) < n:
@@ -114,7 +118,11 @@ def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
             if nxt.is_terminal():
                 continue  # rollout_value needs a decision state; skip
 
-        v0 = rollout_value(nxt)  # exact -- all 4 hands already known
+        # exact -- all 4 hands already known; nxt carries whatever score
+        # _fresh_deal sampled (apply()/clone() preserve it).
+        v0 = rollout_value(nxt, team0_score=nxt.team0_score,
+                           team1_score=nxt.team1_score,
+                           equity_model=equity_model)
         leaf_player = nxt.current_player
         target = v0 if team_of(leaf_player) == 0 else -v0
         obs = observation_tensor(nxt, leaf_player)
@@ -162,7 +170,31 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--grad-clip-norm", type=float, default=5.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--match-equity-table", type=str,
+                    default="rebel/match_equity_table.json",
+                    help="path to the precomputed match-equity table; "
+                         "grounding targets become win-probability deltas "
+                         "at a realistic sampled score instead of raw "
+                         "points, unit-consistent with a match-equity-aware "
+                         "live training run.")
+    ap.add_argument("--no-match-equity", action="store_true",
+                    help="raw point-differential targets at a fixed 0-0 "
+                         "score, this script's original behavior.")
     args = ap.parse_args()
+
+    equity_model = None
+    if not args.no_match_equity:
+        if not os.path.exists(args.match_equity_table):
+            print(f"error: --match-equity-table {args.match_equity_table!r} "
+                  f"not found. Build it first:\n"
+                  f"    python scripts/build_match_equity_table.py "
+                  f"--out {args.match_equity_table}\n"
+                  f"or pass --no-match-equity to run without it.")
+            sys.exit(1)
+        equity_model = MatchEquityModel.load(args.match_equity_table)
+        print(f"match equity: on ({args.match_equity_table})", flush=True)
+    else:
+        print("match equity: off (--no-match-equity)", flush=True)
 
     net = PolicyValueNet()
     if args.resume:
@@ -176,7 +208,8 @@ def main():
           f"stick_the_dealer={args.stick_the_dealer})...", flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.deep_frac,
                             args.max_deep_plies, args.seed,
-                            stick_the_dealer=args.stick_the_dealer)
+                            stick_the_dealer=args.stick_the_dealer,
+                            equity_model=equity_model)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

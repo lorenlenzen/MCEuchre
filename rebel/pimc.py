@@ -28,7 +28,7 @@ from __future__ import annotations
 import math
 import random
 import time
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from euchre.actions import (
     Action, Pass, OrderUp, Call, Discard, Play,
@@ -37,18 +37,24 @@ from euchre.game import EuchreState, Phase, team_of
 from .solver import solve_value
 from .public_belief_state import sample_determinization
 
+if TYPE_CHECKING:
+    from .match_equity import MatchEquityModel
+
 
 def _team_sign(value_team0: int, team: int) -> int:
     """Convert a team0-team1 value into the given team's point differential."""
     return value_team0 if team == 0 else -value_team0
 
 
-def rollout_value(state: EuchreState, memo: Optional[dict] = None) -> int:
-    """Value (team0 - team1) of a fully-known world under optimal play.
-
-    Resolves a pending dealer discard by choosing the discard that is best for
-    the dealer's team, then solves the play phase.
-    """
+def _rollout_value_raw(state: EuchreState, memo: Optional[dict] = None) -> int:
+    """Exact team0-team1 point differential under optimal play from a fully
+    determined state -- the actual recursive minimax/enumeration, entirely
+    raw-point-based throughout. See rebel/match_equity.py's module docstring
+    for why that's exact (not an approximation) even when the public
+    rollout_value() below converts its final result to equity units: Euchre's
+    "exactly one team scores per hand" structure means the *ordinal* ranking
+    of outcomes under any monotonic equity table always matches their raw-
+    point ranking, for pure/deterministic comparisons like this one."""
     if state.is_terminal():
         r = state.returns()
         return r[0] - r[1]
@@ -59,10 +65,39 @@ def rollout_value(state: EuchreState, memo: Optional[dict] = None) -> int:
         best: Optional[int] = None
         shared: dict = {}
         for a in state.legal_actions():
-            v = rollout_value(state.apply(a), shared)
+            v = _rollout_value_raw(state.apply(a), shared)
             if best is None or (v > best if dealer_team == 0 else v < best):
                 best = v
         return best
+    raise ValueError(f"rollout_value cannot start from phase {state.phase}")
+
+
+def rollout_value(state: EuchreState, memo: Optional[dict] = None,
+                  team0_score: Optional[int] = None,
+                  team1_score: Optional[int] = None,
+                  equity_model: Optional["MatchEquityModel"] = None
+                  ) -> float:
+    """Value of a fully-known world under optimal play.
+
+    Resolves a pending dealer discard by choosing the discard that is best for
+    the dealer's team, then solves the play phase.
+
+    By default returns the raw team0-team1 point differential -- byte-
+    identical to this function's original behavior, so every existing caller
+    (PIMCAgent, tests, the value-grounding scripts) is unaffected until it
+    opts in. When `team0_score`/`team1_score` and `equity_model` are all
+    given, converts the raw result to a team0-signed match win-probability
+    delta at this single return boundary instead; the internal search
+    (`_rollout_value_raw`) stays entirely raw-point-based regardless.
+    """
+    raw = _rollout_value_raw(state, memo)
+    if equity_model is not None:
+        assert team0_score is not None and team1_score is not None, (
+            "rollout_value: equity_model requires both team0_score and "
+            "team1_score")
+        p0, p1 = (raw, 0) if raw >= 0 else (0, -raw)
+        return equity_model.equity_delta(team0_score, team1_score, p0, p1)
+    return raw
     raise ValueError(f"rollout_value cannot start from phase {state.phase}")
 
 

@@ -117,10 +117,34 @@ def describe(action):
     return str(action)
 
 
+def print_distribution(net, q):
+    """Full per-action policy distribution for one quiz question, not just
+    the greedy pick -- e.g. a near-uniform spread across suits (honest
+    uncertainty from too little round-2 data) looks very different from a
+    confident, hand-independent bias, even when both give the wrong greedy
+    answer. Useful for telling those two failure modes apart."""
+    st, P = build_state(q)
+    obs = torch.from_numpy(observation_tensor(st, P)).unsqueeze(0)
+    mask = torch.from_numpy(legal_mask(st)).unsqueeze(0)
+    with torch.no_grad():
+        dist = net.policy(obs, mask).squeeze(0).numpy()
+    legal = sorted(st.legal_actions(),
+                   key=lambda a: -dist[action_to_index(a)])
+    print(f"Q{q['id']} ({q['seat']}, {q['phase']}, hand={q['hand']}, "
+          f"quiz answer={describe(answer_action(q))}):")
+    for a in legal:
+        print(f"  {describe(a):14s} p={dist[action_to_index(a)]:.3f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--net", default="checkpoints/rebel_hq.pt")
     ap.add_argument("--quiz", default="docs/euchre_quiz.json")
+    ap.add_argument("--detail", type=int, action="append", default=[],
+                    metavar="QID",
+                    help="print the full policy distribution (not just the "
+                         "greedy pick) for this question id; repeatable, "
+                         "e.g. --detail 11 --detail 2")
     args = ap.parse_args()
 
     net = PolicyValueNet()
@@ -130,6 +154,15 @@ def main():
     quiz = json.load(open(args.quiz))
     bidding = [q for q in quiz["questions"]
                if q.get("buildable") and q["phase"] in ("bid1", "bid2")]
+
+    if args.detail:
+        for qid in args.detail:
+            q = next((x for x in bidding if x["id"] == qid), None)
+            if q is None:
+                print(f"Q{qid}: not a buildable bidding question")
+                continue
+            print_distribution(net, q)
+        print()
 
     print(f"net: {args.net}   bidding questions: {len(bidding)}\n")
     header = (f"{'Q':>2} {'seat':>6} {'phase':>5} {'score':>7} "

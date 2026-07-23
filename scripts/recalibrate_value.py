@@ -21,7 +21,9 @@ checks the bias actually shrinks instead of trusting a fixed epoch count.
 """
 
 import argparse
+import os
 import random
+import sys
 
 import numpy as np
 import torch
@@ -30,15 +32,20 @@ from euchre.actions import Call, OrderUp, Pass
 from euchre.cards import Suit
 from euchre.game import Phase, team_of
 from euchre.infoset import observation_tensor
+from rebel.match_equity import MatchEquityModel
 from rebel.networks import PolicyValueNet
 from rebel.pimc import rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
-def build_samples(n, round2_frac, seed):
+def build_samples(n, round2_frac, seed, equity_model=None):
     """(obs, value_target) pairs for post-call states -- exactly the kind of
-    leaf `batch_value_fn_from_net` gets asked to score during CFR search."""
-    helper = ReBeLTrainer(seed=seed)  # only for _fresh_deal
+    leaf `batch_value_fn_from_net` gets asked to score during CFR search.
+    `equity_model` set: targets are match win-probability deltas at a
+    realistic sampled score (unit-consistent with a match-equity-aware live
+    training run); unset (default): raw point differential at a fixed 0-0
+    score, exactly this function's original behavior."""
+    helper = ReBeLTrainer(seed=seed, equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
     while len(out) < n:
@@ -60,7 +67,11 @@ def build_samples(n, round2_frac, seed):
         else:
             nxt = state.apply(OrderUp(alone=False))
 
-        v0 = rollout_value(nxt)  # exact -- all 4 hands already known
+        # exact -- all 4 hands already known; nxt carries whatever score
+        # _fresh_deal sampled (apply()/clone() preserve it).
+        v0 = rollout_value(nxt, team0_score=nxt.team0_score,
+                           team1_score=nxt.team1_score,
+                           equity_model=equity_model)
         leaf_player = nxt.current_player
         target = v0 if team_of(leaf_player) == 0 else -v0
         obs = observation_tensor(nxt, leaf_player)
@@ -91,7 +102,30 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--grad-clip-norm", type=float, default=5.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--match-equity-table", type=str,
+                    default="rebel/match_equity_table.json",
+                    help="path to the precomputed match-equity table; "
+                         "targets become win-probability deltas at a "
+                         "realistic sampled score instead of raw points, "
+                         "unit-consistent with a match-equity-aware live run.")
+    ap.add_argument("--no-match-equity", action="store_true",
+                    help="raw point-differential targets at a fixed 0-0 "
+                         "score, this script's original behavior.")
     args = ap.parse_args()
+
+    equity_model = None
+    if not args.no_match_equity:
+        if not os.path.exists(args.match_equity_table):
+            print(f"error: --match-equity-table {args.match_equity_table!r} "
+                  f"not found. Build it first:\n"
+                  f"    python scripts/build_match_equity_table.py "
+                  f"--out {args.match_equity_table}\n"
+                  f"or pass --no-match-equity to run without it.")
+            sys.exit(1)
+        equity_model = MatchEquityModel.load(args.match_equity_table)
+        print(f"match equity: on ({args.match_equity_table})", flush=True)
+    else:
+        print("match equity: off (--no-match-equity)", flush=True)
 
     net = PolicyValueNet()
     net.load_state_dict(torch.load(args.resume, map_location="cpu"))
@@ -99,7 +133,8 @@ def main():
 
     print(f"generating {args.samples} post-call value samples "
           f"(round2_frac={args.round2_frac})...", flush=True)
-    samples = build_samples(args.samples, args.round2_frac, args.seed)
+    samples = build_samples(args.samples, args.round2_frac, args.seed,
+                            equity_model=equity_model)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

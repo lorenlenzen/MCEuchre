@@ -79,13 +79,22 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
     from rebel.networks import PolicyValueNet
     from rebel.belief_model import BiddingBeliefModel
 
+    # Each actor loads its own MatchEquityModel from the shared path rather
+    # than the parent constructing one and pickling it across the process
+    # boundary -- cfg stays plain/picklable (a string, like weights_path),
+    # matching how actors already load their own net from a path.
+    equity_model = None
+    if cfg["equity_table"] is not None:
+        from rebel.match_equity import MatchEquityModel
+        equity_model = MatchEquityModel.load(cfg["equity_table"])
+
     t = ReBeLTrainer(
         net=PolicyValueNet(), num_worlds=cfg["worlds"],
         cfr_iterations=cfg["iters"], depth_limit=cfg["depth"],
         bid_depth_limit=cfg["bid_depth"],
         full_depth_cards=cfg["fdc"], belief_model=BiddingBeliefModel(),
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
-        value_ground_frac=cfg["value_ground"],
+        value_ground_frac=cfg["value_ground"], equity_model=equity_model,
         seed=1000 * actor_id + int(time.time()) % 997)
     local_v = -1
     while not stop_flag.value:
@@ -170,6 +179,19 @@ def main():
                          "estimates against reality) -- see "
                          "scripts/recalibrate_value.py for the one-shot "
                          "version of the same fix. Off by default.")
+    ap.add_argument("--match-equity-table", type=str,
+                    default="rebel/match_equity_table.json",
+                    help="path to the precomputed match-equity table (see "
+                         "scripts/build_match_equity_table.py). When loaded, "
+                         "self-play samples a realistic starting match score "
+                         "per hand (euchre/game.py's team0_score/team1_score) "
+                         "and CFR's own terminal utilities become equity-"
+                         "aware, not just the value head's regression target "
+                         "-- see rebel/match_equity.py and docs/rebel_design.md.")
+    ap.add_argument("--no-match-equity", action="store_true",
+                    help="disable match-equity awareness entirely -- every "
+                         "hand trains raw point-differential targets at a "
+                         "fixed 0-0 score, the behavior before this feature.")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--grad-clip-norm", type=float, default=5.0,
                     help="cap the gradient norm of any single train_step; a "
@@ -198,6 +220,21 @@ def main():
     from rebel.train_rebel import ReBeLTrainer
     from rebel.networks import PolicyValueNet
 
+    equity_table_path = None
+    if not args.no_match_equity:
+        equity_table_path = args.match_equity_table
+        if not os.path.exists(equity_table_path):
+            print(f"error: --match-equity-table {equity_table_path!r} not "
+                  f"found. Build it first:\n"
+                  f"    python scripts/build_match_equity_table.py "
+                  f"--out {equity_table_path}\n"
+                  f"or pass --no-match-equity to train without it.",
+                  flush=True)
+            sys.exit(1)
+        print(f"match equity: on ({equity_table_path})", flush=True)
+    else:
+        print("match equity: off (--no-match-equity)", flush=True)
+
     net = PolicyValueNet()
     if args.resume:
         net.load_state_dict(torch.load(args.resume, map_location="cpu"))
@@ -225,7 +262,8 @@ def main():
            "depth": args.depth_limit, "bid_depth": args.bid_depth_limit,
            "fdc": args.full_depth_cards, "stick": args.stick_the_dealer,
            "round2_seed": args.round2_seed_frac,
-           "value_ground": args.value_ground_frac}
+           "value_ground": args.value_ground_frac,
+           "equity_table": equity_table_path}
 
     actors = [ctx.Process(target=actor_loop,
                           args=(i, cfg, weights_path, version, samples_q,
