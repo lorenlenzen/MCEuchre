@@ -53,27 +53,52 @@ from rebel.pimc import rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
+# With stick_the_dealer on, the dealer's Pass is illegal at their round-2
+# turn (bids_seen==3) -- legal_actions() already enforces that, so the walk
+# below naturally forces a call there without any special-casing. Passing
+# here at each of the first three seats with this weight (rather than the
+# first seat always calling) is what lets that forced-call scenario, and
+# round-2 calls from seats other than dealer+1, actually appear in the
+# generated samples -- previously every round-2 sample was seat dealer+1
+# calling on their very first turn, so stick_the_dealer's one behavioral
+# difference (round-2 seat 4) was never exercised regardless of the flag.
+_ROUND2_PASS_WEIGHT = 0.6
+
+
 def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: float):
     """Deal, then apply a real bid (round 1 or, with round2_frac odds, a
-    round-2 call reached via genuine passes) -- same construction proven in
-    recalibrate_value.py's build_samples. Returns None on the rare defensive
-    case a round-2 walk doesn't land on a callable state."""
+    round-2 call reached via genuine passes, walked turn-by-turn) -- built on
+    recalibrate_value.py's construction. Returns None on a round-2 walk that
+    misdeals (all four pass -- only reachable without stick_the_dealer) or
+    otherwise doesn't land on a callable state, matching this function's
+    existing defensive-skip style; a misdeal's trivial (0) value carries no
+    useful gradient anyway, and its terminal state has no real acting player
+    to build an observation from (current_player becomes the CHANCE sentinel)."""
     state = helper._fresh_deal()
     if rng.random() < round2_frac:
         for _ in range(4):
             state = state.apply(Pass())
         if state.phase != Phase.BID_ROUND_2:
             return None
-        calls = [a for a in state.legal_actions()
-                if isinstance(a, Call) and not a.alone]
-        if not calls:
-            return None
-        return state.apply(rng.choice(calls))
+        for _ in range(4):
+            legal = state.legal_actions()
+            calls = [a for a in legal if isinstance(a, Call) and not a.alone]
+            passes = [a for a in legal if isinstance(a, Pass)]
+            if passes and (not calls or rng.random() < _ROUND2_PASS_WEIGHT):
+                state = state.apply(passes[0])
+                if state.phase != Phase.BID_ROUND_2:
+                    return None  # misdeal
+                continue
+            if not calls:
+                return None  # defensive; unreachable given the checks above
+            return state.apply(rng.choice(calls))
+        return None  # defensive; round 2 always resolves within 4 turns
     return state.apply(OrderUp(alone=False))
 
 
-def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed):
-    helper = ReBeLTrainer(seed=seed)  # only for _fresh_deal
+def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
+                  stick_the_dealer=False):
+    helper = ReBeLTrainer(seed=seed, stick_the_dealer=stick_the_dealer)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
     while len(out) < n:
@@ -124,6 +149,13 @@ def main():
                          "grounding, for value coverage across the whole "
                          "hand depth rather than just the immediate leaf")
     ap.add_argument("--max-deep-plies", type=int, default=16)
+    ap.add_argument("--stick-the-dealer", action="store_true",
+                    help="deal with stick-the-dealer on, matching the live "
+                         "training run this checkpoint will seed -- forces "
+                         "the dealer's round-2 turn to call rather than "
+                         "misdeal, so this checkpoint's value head has "
+                         "actually seen that state distribution before "
+                         "self-play does.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3)
     ap.add_argument("--batch-size", type=int, default=128)
@@ -140,10 +172,11 @@ def main():
         print("starting from a fresh random-init net", flush=True)
 
     print(f"generating {args.samples} value-grounding samples "
-          f"(round2_frac={args.round2_frac}, deep_frac={args.deep_frac})...",
-          flush=True)
+          f"(round2_frac={args.round2_frac}, deep_frac={args.deep_frac}, "
+          f"stick_the_dealer={args.stick_the_dealer})...", flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.deep_frac,
-                            args.max_deep_plies, args.seed)
+                            args.max_deep_plies, args.seed,
+                            stick_the_dealer=args.stick_the_dealer)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)
