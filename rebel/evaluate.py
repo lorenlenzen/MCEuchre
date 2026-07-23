@@ -92,6 +92,128 @@ class RuleBasedAgent:
         return rng.choice(legal)
 
 
+class PointCountAgent:
+    """A point-count bidding heuristic, stronger than :class:`RuleBasedAgent`.
+
+    Scores a hand's strength for a candidate trump suit as the sum of
+    per-card values -- trump cards weighted by rank (bowers highest),
+    off-suit aces/kings worth something, everything else off-suit near
+    nothing -- plus a ruffing bonus for suits you're void or singleton in,
+    capped by how much spare trump you actually have to ruff with. Calling
+    (and going alone) is then a fixed threshold on that score, separately
+    for round 1, round 2, and alone. Discard and play are unchanged from
+    ``RuleBasedAgent``'s simple greedy logic -- the improvement here is
+    specifically a sharper bidding decision.
+    """
+
+    ORDER_1_THRESH = 2.2
+    ORDER_2_THRESH = 2.4
+    ALONE_THRESH = 3.6
+
+    _TRUMP_RANK_POINTS = {
+        "ACE": 0.72, "KING": 0.50, "QUEEN": 0.30, "TEN": 0.18, "NINE": 0.12,
+    }
+
+    def _trump_score(self, card, trump) -> float:
+        from euchre.cards import is_right_bower, is_left_bower
+        if is_right_bower(card, trump):
+            return 0.95
+        if is_left_bower(card, trump):
+            return 0.85
+        return self._TRUMP_RANK_POINTS[card.rank.name]
+
+    def _offsuit_score(self, card) -> float:
+        if card.rank.name == "ACE":
+            return 0.50
+        if card.rank.name == "KING":
+            return 0.16
+        return 0.03
+
+    def hand_score(self, hand, trump) -> float:
+        from euchre.cards import is_trump, effective_suit, Suit
+        total = 0.0
+        n_trump = 0
+        suit_counts = {s: 0 for s in Suit}
+        for c in hand:
+            suit_counts[effective_suit(c, trump)] += 1
+            if is_trump(c, trump):
+                total += self._trump_score(c, trump)
+                n_trump += 1
+            else:
+                total += self._offsuit_score(c)
+
+        bonus = 0.0
+        for s in Suit:
+            if s == trump:
+                continue
+            cnt = suit_counts[s]
+            if cnt == 0:
+                bonus += 0.35
+            elif cnt == 1:
+                bonus += 0.15
+        bonus = min(bonus, max(0.0, (n_trump - 1) * 0.40))
+        return total + bonus
+
+    def act(self, state: EuchreState, rng: random.Random) -> Action:
+        from euchre.actions import Pass, OrderUp, Call, Discard
+        from euchre.cards import is_trump, card_strength, effective_suit, Suit
+        from euchre.game import Phase
+
+        legal = state.legal_actions()
+
+        if state.phase == Phase.BID_ROUND_1:
+            trump = state.up_card.suit
+            score = self.hand_score(state.hands[state.current_player], trump)
+            if score >= self.ORDER_1_THRESH:
+                return OrderUp(alone=score >= self.ALONE_THRESH)
+            return Pass()
+
+        if state.phase == Phase.BID_ROUND_2:
+            hand = state.hands[state.current_player]
+            best_suit, best_score = None, -1.0
+            for suit in Suit:
+                if suit == state.turned_down:
+                    continue
+                s = self.hand_score(hand, suit)
+                if s > best_score:
+                    best_suit, best_score = suit, s
+            calls = [a for a in legal if isinstance(a, Call)]
+            if best_suit is not None and best_score >= self.ORDER_2_THRESH:
+                alone = best_score >= self.ALONE_THRESH
+                for a in calls:
+                    if a.suit == best_suit and a.alone == alone:
+                        return a
+            passes = [a for a in legal if isinstance(a, Pass)]
+            if passes:
+                return passes[0]
+            # Stick-the-dealer: forced to call regardless of threshold.
+            if best_suit is not None:
+                for a in calls:
+                    if a.suit == best_suit:
+                        return a
+            return calls[0]
+
+        if state.phase == Phase.DEALER_DISCARD:
+            trump = state.trump
+            worst = min(state.hands[state.dealer],
+                        key=lambda c: (is_trump(c, trump),
+                                       card_strength(c, trump, c.suit)))
+            return Discard(worst)
+
+        if state.phase == Phase.PLAY:
+            trump = state.trump
+            if state.current_trick:
+                led = state.current_trick[0][1]
+                led_suit = effective_suit(led, trump)
+            else:
+                led_suit = None
+            key = lambda a: card_strength(a.card, trump,
+                                          led_suit if led_suit else a.card.suit)
+            return max(legal, key=key)
+
+        return rng.choice(legal)
+
+
 class MCCFRAgent:
     def __init__(self, trainer: MCCFRTrainer, greedy: bool = False) -> None:
         self.trainer = trainer

@@ -11,7 +11,9 @@ import argparse
 import time
 
 from rebel.ladder import AgentSpec, evaluate_ladder, format_leaderboard
-from rebel.evaluate import RandomAgent, RuleBasedAgent, MCCFRAgent
+from rebel.evaluate import (
+    RandomAgent, RuleBasedAgent, PointCountAgent, MCCFRAgent,
+)
 from rebel.mccfr import MCCFRTrainer
 from rebel.pimc import PIMCAgent
 from rebel.belief_model import BiddingBeliefModel
@@ -34,6 +36,7 @@ def main() -> None:
     specs = [
         AgentSpec("random", RandomAgent),
         AgentSpec("rule_based", RuleBasedAgent),
+        AgentSpec("point_count", PointCountAgent),
         AgentSpec("mccfr_200it", lambda: MCCFRAgent(mccfr)),
     ]
     if args.pimc:

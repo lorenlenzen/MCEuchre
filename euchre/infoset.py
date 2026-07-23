@@ -19,7 +19,10 @@ from typing import List
 
 import numpy as np
 
-from .cards import Card, Suit, NUM_CARDS
+from .cards import (
+    Card, Suit, Rank, RANKS, SUITS, NUM_CARDS, _RANK_INDEX,
+    same_color_suit, effective_suit, is_trump, is_left_bower, is_right_bower,
+)
 from .game import EuchreState, Phase
 
 
@@ -61,81 +64,203 @@ def infoset_key(state: EuchreState, player: int) -> str:
     return "/".join(parts)
 
 
-# --- Fixed-length observation vector ----------------------------------------
+# --- Fixed-length observation vector (suit-agnostic / trump-relative) --------
+#
+# Every suit-bearing feature is encoded by its ROLE relative to a reference
+# suit R (= trump once set, else the up-card's suit during bidding), never by
+# absolute suit identity. The two off-color ("green") suits share the single
+# "green" role tag, so a network built on this encoding cannot develop a
+# per-absolute-suit preference: relabeling the two greens (or any color-
+# preserving suit permutation) permutes the observation's per-suit blocks
+# without otherwise changing it. See docs/rebel_design.md and the plan.
+#
+# Layout: [ global block | 4 per-suit blocks (absolute slot order, role-
+# relative contents) | 24 per-card feature blocks (card-id order) ]. The
+# per-suit blocks stay in ABSOLUTE order so a shared network tower maps each
+# to its own Call/Play output index by construction; only their *contents*
+# are role-relative, which is what makes the tower suit-agnostic.
 
 _PHASES = [Phase.BID_ROUND_1, Phase.BID_ROUND_2, Phase.DEALER_DISCARD,
            Phase.PLAY, Phase.TERMINAL]
 
-# Segment sizes, summed into OBS_SIZE.
-_SEG = {
-    "hand": NUM_CARDS,          # 24  own cards (multi-hot)
-    "up": NUM_CARDS,            # 24  up-card one-hot (bidding only)
-    "up_flag": 1,               #  1  up-card visible?
-    "trump": 5,                 #  5  none + 4 suits
-    "turned_down": 5,           #  5  none + 4 suits
-    "phase": len(_PHASES),      #  5
-    "dealer_rel": 4,            #  4
-    "maker_rel": 5,             #  5  none + 4 relative seats
-    "alone": 1,                 #  1
-    "played_by_seat": 4 * NUM_CARDS,  # 96  cards played this hand, by rel seat
-    "trick_by_seat": 4 * NUM_CARDS,   # 96  cards in current trick, by rel seat
-    "tricks_won": 2,            #  2  (my team, their team) counts / 5
-    "to_lead": 1,               #  1  am I on lead this trick?
-}
-OBS_SIZE = sum(_SEG.values())
+# Roles of a suit relative to the reference suit R.
+_ROLE_REF, _ROLE_NEXT, _ROLE_GREEN = 0, 1, 2
+N_ROLES = 3
+
+# The 7 trump-rank "slots" for the as-if-this-suit-were-trump holdings, in
+# strength order: right bower, left bower, then A/K/Q/10/9 of the suit.
+_TRUMP_HOLDING_RANKS = [Rank.ACE, Rank.KING, Rank.QUEEN, Rank.TEN, Rank.NINE]
+
+# --- segment dims ---
+_GLOBAL = (
+    len(_PHASES)   # phase one-hot
+    + 4            # dealer, relative seat
+    + 5            # maker: none + 4 relative seats
+    + 1            # alone
+    + 2            # tricks won: mine, theirs (/5)
+    + 1            # am I on lead this trick?
+    + 1            # bids_seen (/7)
+    + 1            # up-card visible?
+    + 6            # up-card rank one-hot (belongs to the reference suit)
+    + 4            # led-card role this trick: none/ref/next/green
+)  # = 30
+
+_SUIT_BLOCK = (
+    N_ROLES        # role one-hot (ref/next/green)
+    + 1            # is the turned-down suit (illegal to call in round 2)
+    + 1            # is the actual trump suit
+    + 7            # as-if-trump holdings: RB, LB, A, K, Q, 10, 9
+    + 1            # as-if-trump count (/5)
+    + 6            # effective plain-suit holdings under actual trump (by rank)
+    + 1            # void in this effective suit
+    + 4            # cards of this effective suit played, per relative seat (/5)
+    + 1            # cards of this suit seen so far (/6)
+)  # = 25
+NUM_SUITS = 4
+
+_CARD_FEAT = (
+    6              # rank one-hot
+    + 1            # in my hand
+    + 1            # is right bower (actual trump)
+    + 1            # is left bower (actual trump)
+    + 1            # is effective trump (actual trump)
+    + 1            # has been played this hand
+)  # = 11
+
+GLOBAL_OFF = 0
+SUIT_OFF = _GLOBAL
+SUIT_BLOCK_DIM = _SUIT_BLOCK
+GLOBAL_DIM = _GLOBAL
+CARD_FEAT_DIM = _CARD_FEAT
+CARD_OFF = _GLOBAL + NUM_SUITS * _SUIT_BLOCK
+OBS_SIZE = _GLOBAL + NUM_SUITS * _SUIT_BLOCK + NUM_CARDS * _CARD_FEAT
 
 
-def _suit_onehot(vec: np.ndarray, base: int, suit) -> None:
-    # index 0 = none, 1..4 = suit
-    vec[base + (0 if suit is None else int(suit) + 1)] = 1.0
+def _reference_suit(state: EuchreState):
+    """The suit everything is encoded relative to: trump once set, else the
+    up-card's suit during bidding. None only in DEAL/TERMINAL (no decision)."""
+    if state.trump is not None:
+        return state.trump
+    if state.up_card is not None:
+        return state.up_card.suit
+    return None
+
+
+def _role_of(suit: Suit, ref) -> int:
+    if ref is None:
+        return _ROLE_GREEN  # no reference (DEAL/TERMINAL); role is unused
+    if suit == ref:
+        return _ROLE_REF
+    if suit == same_color_suit(ref):
+        return _ROLE_NEXT
+    return _ROLE_GREEN
 
 
 def observation_tensor(state: EuchreState, player: int) -> np.ndarray:
     v = np.zeros(OBS_SIZE, dtype=np.float32)
-    o = 0
+    hand = state.hands[player]
+    hand_set = set(hand)
+    trump = state.trump
+    ref = _reference_suit(state)
+    show_up = (state.up_card is not None and trump is None)
 
-    for c in state.hands[player]:
-        v[o + c.id] = 1.0
-    o += _SEG["hand"]
-
-    show_up = (state.up_card is not None and state.trump is None)
-    if show_up:
-        v[o + state.up_card.id] = 1.0
-    o += _SEG["up"]
-    v[o] = 1.0 if show_up else 0.0
-    o += _SEG["up_flag"]
-
-    _suit_onehot(v, o, state.trump); o += _SEG["trump"]
-    _suit_onehot(v, o, state.turned_down); o += _SEG["turned_down"]
-
+    # ---- global block ----
+    o = GLOBAL_OFF
     v[o + _PHASES.index(state.phase)] = 1.0
-    o += _SEG["phase"]
-
+    o += len(_PHASES)
     v[o + _rel(state.dealer, player)] = 1.0
-    o += _SEG["dealer_rel"]
-
+    o += 4
     v[o + (0 if state.maker is None else _rel(state.maker, player) + 1)] = 1.0
-    o += _SEG["maker_rel"]
-
+    o += 5
     v[o] = 1.0 if state.alone else 0.0
-    o += _SEG["alone"]
-
-    for winner, plays in state.completed_tricks:
-        for seat, c in plays:
-            v[o + _rel(seat, player) * NUM_CARDS + c.id] = 1.0
-    o += _SEG["played_by_seat"]
-
-    for seat, c in state.current_trick:
-        v[o + _rel(seat, player) * NUM_CARDS + c.id] = 1.0
-    o += _SEG["trick_by_seat"]
-
+    o += 1
     my_team = player % 2
     v[o] = state.tricks_won[my_team] / 5.0
     v[o + 1] = state.tricks_won[1 - my_team] / 5.0
-    o += _SEG["tricks_won"]
-
+    o += 2
     v[o] = 1.0 if (state.phase == Phase.PLAY and not state.current_trick) else 0.0
-    o += _SEG["to_lead"]
+    o += 1
+    v[o] = state.bids_seen / 7.0
+    o += 1
+    v[o] = 1.0 if show_up else 0.0
+    o += 1
+    if show_up:
+        v[o + _RANK_INDEX[state.up_card.rank]] = 1.0
+    o += 6
+    # led-card role this trick: index 0 = no led card, else role+1
+    if state.current_trick:
+        led_role = _role_of(effective_suit(state.current_trick[0][1], trump), ref)
+        v[o + led_role + 1] = 1.0
+    else:
+        v[o] = 1.0
+    o += 4
+    assert o == SUIT_OFF
 
-    assert o == OBS_SIZE
+    # ---- per-suit blocks (absolute slot, role-relative contents) ----
+    # Precompute public play info once.
+    played_cards = []  # (rel_seat, card)
+    for _winner, plays in state.completed_tricks:
+        for seat, c in plays:
+            played_cards.append((_rel(seat, player), c))
+    for seat, c in state.current_trick:
+        played_cards.append((_rel(seat, player), c))
+
+    for s in SUITS:
+        o = SUIT_OFF + int(s) * _SUIT_BLOCK
+        v[o + _role_of(s, ref)] = 1.0
+        o += N_ROLES
+        v[o] = 1.0 if state.turned_down == s else 0.0
+        o += 1
+        v[o] = 1.0 if trump == s else 0.0
+        o += 1
+        # as-if-s-were-trump holdings: right bower, left bower, A, K, Q, 10, 9
+        v[o] = 1.0 if Card(s, Rank.JACK) in hand_set else 0.0
+        v[o + 1] = 1.0 if Card(same_color_suit(s), Rank.JACK) in hand_set else 0.0
+        for i, r in enumerate(_TRUMP_HOLDING_RANKS):
+            v[o + 2 + i] = 1.0 if Card(s, r) in hand_set else 0.0
+        o += 7
+        as_if_trump = sum(1 for c in hand if is_trump(c, s))
+        v[o] = as_if_trump / 5.0
+        o += 1
+        # effective plain-suit holdings under ACTUAL trump (by rank)
+        eff_here = [c for c in hand if effective_suit(c, trump) == s]
+        for c in eff_here:
+            v[o + _RANK_INDEX[c.rank]] = 1.0
+        o += 6
+        v[o] = 1.0 if not eff_here else 0.0
+        o += 1
+        # cards of this effective suit played, per relative seat (/5)
+        for rel_seat, c in played_cards:
+            if effective_suit(c, trump) == s:
+                v[o + rel_seat] += 1.0 / 5.0
+        o += 4
+        # cards of this (effective) suit seen so far. Divisor 7 because the
+        # effective trump suit spans 7 cards (its own 6 + the left bower); all
+        # other effective suits are smaller, so this keeps the feature in
+        # [0, 1] for every suit/role.
+        seen = len(eff_here) + sum(1 for _rs, c in played_cards
+                                   if effective_suit(c, trump) == s)
+        if show_up and effective_suit(state.up_card, trump) == s:
+            seen += 1
+        v[o] = seen / 7.0
+        o += 1
+
+    # ---- per-card feature blocks (card-id order) ----
+    played_set = {c for _rs, c in played_cards}
+    for cid in range(NUM_CARDS):
+        c = Card.from_id(cid)
+        o = CARD_OFF + cid * _CARD_FEAT
+        v[o + _RANK_INDEX[c.rank]] = 1.0
+        o += 6
+        v[o] = 1.0 if c in hand_set else 0.0
+        o += 1
+        v[o] = 1.0 if (trump is not None and is_right_bower(c, trump)) else 0.0
+        o += 1
+        v[o] = 1.0 if (trump is not None and is_left_bower(c, trump)) else 0.0
+        o += 1
+        v[o] = 1.0 if (trump is not None and is_trump(c, trump)) else 0.0
+        o += 1
+        v[o] = 1.0 if c in played_set else 0.0
+        o += 1
+
     return v

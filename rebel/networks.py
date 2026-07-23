@@ -19,8 +19,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from euchre.infoset import OBS_SIZE
+from euchre.infoset import (
+    OBS_SIZE, GLOBAL_DIM, SUIT_OFF, SUIT_BLOCK_DIM, CARD_OFF, CARD_FEAT_DIM,
+    NUM_SUITS,
+)
+from euchre.cards import NUM_CARDS
 from euchre.actions import NUM_ACTIONS
+
+_CARDS_PER_SUIT = NUM_CARDS // NUM_SUITS  # 6
 
 
 class MLP(nn.Module):
@@ -37,31 +43,86 @@ class MLP(nn.Module):
         return self.head(self.trunk(x))
 
 
-# The flat action space splits cleanly into play (card plays) and bidding
-# (discard / call / order-up / pass). Giving each its own output head lets the
-# two very different decision types specialise instead of sharing one linear
-# layer. Going alone is already first-class (OrderUp(alone), Call(alone)).
-_NUM_PLAY_ACTIONS = 24  # indices [0, 24)
-
-
 class PolicyValueNet(nn.Module):
-    """Shared trunk with separate play/bidding policy heads and a value head."""
+    """Suit-agnostic relational policy/value network.
+
+    Every suit-bearing output is produced by a *shared* tower applied to each
+    suit's (or card's) role-relative feature block, so the two off-color
+    ("green") suits are handled by identical weights and no per-absolute-suit
+    preference can form -- the failure mode diagnosed and fixed this session.
+    Absolute suit identity never enters as a parameter; only role (encoded in
+    the observation relative to the trump/up-card suit) does. See
+    euchre/infoset.py for the matching encoding and docs/rebel_design.md.
+
+    The external interface is unchanged: forward(obs) -> (logits[59], value),
+    with logits laid out exactly as euchre/actions.py's flat index space, so
+    the CFR solver, training loop, and agents are untouched.
+    """
 
     def __init__(self, obs_size: int = OBS_SIZE, num_actions: int = NUM_ACTIONS,
-                 hidden: int = 256, depth: int = 3) -> None:
+                 suit_emb: int = 64, hidden: int = 128, context: int = 128
+                 ) -> None:
         super().__init__()
-        layers = [nn.Linear(obs_size, hidden), nn.ReLU()]
-        for _ in range(depth - 1):
-            layers += [nn.Linear(hidden, hidden), nn.ReLU()]
-        self.trunk = nn.Sequential(*layers)
-        self.play_head = nn.Linear(hidden, _NUM_PLAY_ACTIONS)
-        self.bid_head = nn.Linear(hidden, num_actions - _NUM_PLAY_ACTIONS)
-        self.value_head = nn.Linear(hidden, 1)
+        assert obs_size == OBS_SIZE and num_actions == NUM_ACTIONS
+        self.suit_emb = suit_emb
+        # Shared suit encoder: one per-suit role-relative block -> embedding.
+        self.suit_encoder = MLP(SUIT_BLOCK_DIM, hidden, suit_emb, depth=2)
+        # Context trunk: symmetric pool over the 4 suit embeddings (permutation
+        # invariant -> green-symmetric) concatenated with the global block.
+        self.context = MLP(suit_emb + GLOBAL_DIM, hidden, context, depth=2)
+        # Shared "value of making suit s trump" scorer -> (not-alone, alone).
+        # Used for BOTH OrderUp (the reference suit, round 1) and Call (round
+        # 2), so round 1's abundant order-up gradient trains the very weights
+        # that score round-2 suit calls.
+        self.make_trump = MLP(suit_emb + context, hidden, 2, depth=2)
+        # Shared per-card scorers (play and discard), on role-relative card
+        # features + that card's suit embedding + context.
+        self.play_scorer = MLP(suit_emb + CARD_FEAT_DIM + context, hidden, 1,
+                               depth=2)
+        self.discard_scorer = MLP(suit_emb + CARD_FEAT_DIM + context, hidden, 1,
+                                  depth=2)
+        self.pass_head = nn.Linear(context, 1)
+        self.value_head = MLP(context, hidden, 1, depth=2)
 
     def forward(self, obs: torch.Tensor):
-        h = self.trunk(obs)
-        logits = torch.cat([self.play_head(h), self.bid_head(h)], dim=-1)
-        return logits, self.value_head(h).squeeze(-1)
+        b = obs.shape[0]
+        glob = obs[:, :GLOBAL_DIM]
+        suit_blocks = obs[:, SUIT_OFF:SUIT_OFF + NUM_SUITS * SUIT_BLOCK_DIM]
+        suit_blocks = suit_blocks.reshape(b, NUM_SUITS, SUIT_BLOCK_DIM)
+        card_feats = obs[:, CARD_OFF:CARD_OFF + NUM_CARDS * CARD_FEAT_DIM]
+        card_feats = card_feats.reshape(b, NUM_CARDS, CARD_FEAT_DIM)
+
+        # role one-hot is the first N_ROLES dims of each suit block; index 0 is
+        # the reference role (the up-card / trump suit), used to route the
+        # make-trump score to OrderUp.
+        ref_ind = suit_blocks[:, :, 0]  # (b, 4) -- exactly one 1 when defined
+
+        suit_e = self.suit_encoder(suit_blocks)              # (b, 4, E)
+        pooled = suit_e.mean(dim=1)                          # (b, E) symmetric
+        ctx = self.context(torch.cat([pooled, glob], dim=-1))  # (b, C)
+
+        ctx_suit = ctx.unsqueeze(1).expand(b, NUM_SUITS, -1)
+        make = self.make_trump(torch.cat([suit_e, ctx_suit], dim=-1))  # (b,4,2)
+        call_na = make[:, :, 0]                              # (b, 4)
+        call_al = make[:, :, 1]                              # (b, 4)
+        orderup_na = (ref_ind * call_na).sum(dim=1, keepdim=True)   # (b, 1)
+        orderup_al = (ref_ind * call_al).sum(dim=1, keepdim=True)   # (b, 1)
+
+        # each card's suit embedding: cards are id-ordered (suit*6 + rank), so
+        # repeat each suit embedding for its 6 ranks.
+        card_suit_e = suit_e.repeat_interleave(_CARDS_PER_SUIT, dim=1)  # (b,24,E)
+        ctx_card = ctx.unsqueeze(1).expand(b, NUM_CARDS, -1)
+        card_in = torch.cat([card_suit_e, card_feats, ctx_card], dim=-1)
+        play = self.play_scorer(card_in).squeeze(-1)         # (b, 24)
+        discard = self.discard_scorer(card_in).squeeze(-1)   # (b, 24)
+        pass_l = self.pass_head(ctx)                         # (b, 1)
+
+        # Assemble in the exact order of euchre/actions.py's flat index space:
+        # play[0:24], discard[24:48], call[48:52], call_alone[52:56],
+        # orderup[56], orderup_alone[57], pass[58].
+        logits = torch.cat([play, discard, call_na, call_al,
+                            orderup_na, orderup_al, pass_l], dim=-1)
+        return logits, self.value_head(ctx).squeeze(-1)
 
     def policy(self, obs: torch.Tensor,
                legal_mask: Optional[torch.Tensor] = None) -> torch.Tensor:

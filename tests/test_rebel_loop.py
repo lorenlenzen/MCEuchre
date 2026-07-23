@@ -57,7 +57,7 @@ def test_train_step_reduces_loss_on_a_fixed_batch():
         mask[legal] = True
         pol = np.zeros(NUM_ACTIONS, dtype=np.float32)
         pol[legal[0]] = 1.0  # deterministic target
-        trainer.buffer.append(Sample(obs, mask, pol, float(rng.uniform(-2, 2))))
+        trainer._store(Sample(obs, mask, pol, float(rng.uniform(-2, 2))))
     first = trainer.train_step(batch_size=16)
     for _ in range(60):
         last = trainer.train_step(batch_size=16)

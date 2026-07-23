@@ -193,6 +193,87 @@ needs the compact team representations from the literature (column generation
 over best-response oracles, or TB-DAG CFR) — a genuine research step. The
 reference here makes the technique concrete and quantifies the correlation gap.
 
+### Milestone 3.5 — Suit-agnostic relational network ✅
+
+**Diagnosis.** Live training exposed a specific, confirmed failure: round-2
+bidding (which suit to call) would pick a suit the hand held *zero* cards of
+("Call Clubs" on a 3-hearts hand), and got *worse* the longer self-play ran.
+Isolated the cause via direct comparison rather than guesswork:
+
+* An exact double-dummy `rollout_value` oracle and the actual `SubgameSolver`
+  CFR search (both net-leaf and exact-grounded-leaf) all agreed the correct
+  call was Hearts, the search producing it with **98% confidence**. So the
+  regret minimization itself was not broken.
+* The trained net's **value head**, from the same shared trunk, also ranked
+  the suits correctly. Only the **policy head's** suit choice was inverted.
+* Measuring the policy head's greedy call across 200 real round-2 states
+  showed a **hand-independent skew** (48% of all calls were Clubs,
+  regardless of hand) — not a broken head (its weight rows were genuinely
+  differentiated, cosine similarity 0.28–0.47, not collapsed), but an
+  **anchor** riding on top of real hand-dependent variation. The anchor was
+  demonstrably arbitrary and mobile: a checkpoint from earlier the same run
+  favored **Hearts** (mean call-logit −1.87) while the later one favored
+  **Clubs** (−1.88) — training had made it *worse*, not better.
+* Root cause: `euchre/actions.py`'s Call-suit outputs sit at fixed absolute
+  indices (Call Clubs = 48 … Call Spades = 51) with **no shared parameters**
+  between suits, and only receive gradient from round-2 samples — roughly
+  **0.03% of the training signal** (round 2 itself is ~0.67% of hands, and
+  each hand yields ~13 total samples across all decision types). Four
+  independent sub-problems, each starved of data, is exactly the setup for
+  an unconverged, drifting per-suit offset.
+
+**Fix: make the net suit-agnostic by construction**, not by more data.
+Two coordinated rewrites:
+
+* **`euchre/infoset.py` — trump-relative encoding.** `observation_tensor`
+  now encodes everything by *role* relative to a reference suit R (trump
+  once set, else the up-card's suit during bidding) via `same_color_suit`:
+  `role0` = R, `role1` = its same-color partner ("next"), `role2`/`role3` =
+  the two off-color suits ("green") — **both greens carry the identical role
+  tag**. Layout: a suit-independent global block, 4 per-suit blocks (kept at
+  *absolute* slots so a shared tower still maps 1:1 to each output index, but
+  their *contents* — role tag, as-if-trump holdings, effective plain
+  holdings, per-relative-seat played counts — are role-relative), and 24
+  per-card feature blocks. `OBS_SIZE` grew from 249 to **394**.
+  `infoset_key` (the tabular CFR regret-table key) is untouched — a single
+  `SubgameSolver` solve is always a concrete, fixed-suit situation, so
+  cross-suit generalization is the net's job alone.
+* **`rebel/networks.py` — relational `PolicyValueNet`.** A shared
+  suit-encoder MLP runs over each of the 4 role-relative suit blocks
+  (identical weights ⇒ the two greens are handled by *the same parameters*,
+  not just similar ones); a symmetric mean-pool over the 4 embeddings feeds
+  a context trunk (permutation-invariant, preserving green symmetry). A
+  **shared make-trump scorer** — `(suit embedding, context) → (score,
+  score-alone)` — produces *every* OrderUp and Call logit: round 1's
+  OrderUp routes through the reference-role suit, round 2's Call through
+  whichever role each suit carries. This unification is a deliberate
+  sample-efficiency fix, not just a symmetry one — round 1's abundant
+  order-up gradient now trains the exact weights that score round-2 suit
+  calls, directly attacking the data sparsity that let the anchor form.
+  Shared per-card scorers likewise produce every Play and Discard logit.
+  External interface unchanged: `forward(obs) -> (logits[59], value)`, so
+  `SubgameSolver`, `ReBeLTrainer`, and every agent/script are untouched.
+
+**Verification** (`tests/test_suit_symmetry.py`, 4 tests, all passing):
+
+| check | result |
+|---|---|
+| Encoding equivariant under the 8-element color-preserving suit-relabeling group | **exact 0.0** error |
+| Network equivariant under the same group | **1.5e-08** (float32 precision) |
+| Green-swap: the two green suits' Call logits swap exactly | verified |
+| Symmetry survives real gradient steps (30 training steps) | **1.2e-07** error |
+
+The Clubs/Hearts anchor is now **mathematically impossible**, not merely
+trained away — green1 and green2 are provably the same function. Full suite:
+75/75 passing. Throughput: ~17.4k `observation_tensor` calls/sec, ~42k
+states/sec batched net forward (measured on this machine) — heavier than the
+prior absolute encoding but not the search hot-path's bottleneck.
+
+**Consequence:** this is an architecture + encoding change, so existing
+checkpoints (`rebel_hq*.pt`) are incompatible and training must restart from
+scratch. See [`checkpoints/README.md`](../checkpoints/README.md) for the
+warm-start approach used to reduce that cost.
+
 #### Original Milestone 3 notes
 * Team subtleties: partners share reward but not information. Evaluate whether
   independent-per-player CFR suffices or whether a joint/correlated policy
@@ -222,13 +303,48 @@ reference here makes the technique concrete and quantifies the correlation gap.
 * Ablations to run on the ladder: depth limit, CFR iterations, belief model
   on/off, self-play population.
 
+### Known gaps (not yet scheduled)
+
+* **No score/match-equity awareness.** Every hand is trained and evaluated in
+  total isolation from the race-to-10 game score: `EuchreState` has no score
+  field, `infoset.py`'s observation encoding has no channel for one, and
+  every value target in the pipeline (`SubgameSolver` leaves, `PIMCAgent`
+  rollouts, the value net's regression target) is the hand's own raw point
+  differential. Real Euchre strategy is score-dependent (e.g. a team at 9
+  needing 1 more point shouldn't value a risky 4-point loner the way a team
+  at 6 needing to catch up should) — analogous to backgammon match equity or
+  poker tournament ICM. Fixing this needs: a score field threaded through
+  state/observation, `self_play_hand()` generalized into a match-shaped loop
+  that carries cumulative score across a sequence of hands, and a
+  score-conditioned equity model (table or small net) that leaf/root values
+  get converted through instead of raw point differential. Note this is
+  orthogonal to the current hand-level ladder benchmarks (`rebel/evaluate.py`
+  plays isolated hands with no score dimension) — it matters for real
+  race-to-10 play strength, not for the numbers the ladder currently reports.
+* **Stick-the-dealer defaults off.** `ReBeLTrainer` now takes a
+  `stick_the_dealer` param (plumbed through `--stick-the-dealer` in both
+  `scripts/train_parallel.py` and `scripts/train_scale.py`, including the
+  periodic eval calls), but it defaults to `False`, matching
+  `EuchreState.new_hand()`'s own default. `rebel_hq.pt` was trained entirely
+  with it off, so it has never actually seen a forced-call decision in round
+  2 — a full pass-out just misdeals the hand (`reward=(0,0)`) instead. Any
+  checkpoint trained so far is untested (and probably weak) in rule sets
+  where stick-the-dealer is on; turning the flag on for future runs starts
+  exercising it, but past training doesn't retroactively cover it.
+
 ## Design decisions & rationale
 
 * **Per-hand episodes.** ReBeL treats one hand as the game; the value is the
   hand's point differential. Game-to-10 meta-strategy (e.g., risk adjustment
-  when trailing) is a thin wrapper added later.
+  when trailing) is a thin wrapper added later -- see "Known gaps" above.
 * **Relative-seat encoding.** Observations are encoded from the acting
   player's seat so the net generalizes across positions.
+* **Relative-suit (role) encoding.** Suits are encoded and scored by role
+  relative to the trump/up-card suit (reference / next / green), with shared
+  per-suit and per-card network towers, so the net generalizes across suits
+  the same way it already does across seats — see Milestone 3.5. Absolute
+  suit identity (`Suit.CLUBS` etc.) exists only in `EuchreState`/actions, never
+  as a learned parameter.
 * **Tabular MCCFR as ground truth.** It solves the *real* game (no
   abstraction), so it both benchmarks and supplies training targets — the net
   is judged by how well it reproduces it.

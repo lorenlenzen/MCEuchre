@@ -1,0 +1,179 @@
+{
+  "_about": "Transcription of the Ohio Euchre Main Quiz (docs/Ohio Euchre answers.pdf) into a machine-readable form. Cards: rank in {9,T,J,Q,K,A} + suit in {C,D,H,S}, e.g. 'JS'=Jack of Spades, 'TD'=Ten of Diamonds. seat: which chair the answerer sits in relative to the dealer (first/second/third/dealer). 'turned_down' is set for round-2 (bid2) decisions = the up-card suit rejected in round 1. score is [you, them]. score_dependent flags answers whose correctness hinges on the game score, which the current net's observation encoding does NOT include (see docs/rebel_design.md 'Known gaps'). Likewise stick_the_dealer scenarios were never trained.",
+  "questions": [
+    {
+      "id": 1, "page": 2, "phase": "play", "buildable": false,
+      "score": [8, 9], "text": "Dealer turned down QC; you called next (spades) and lead JC. S2 plays 9C, S3 plays 9S, dealer plays AS. Lead next?",
+      "trump": "S", "hand": ["JS", "AH", "KD", "9D"], "options": ["JS", "AH", "KD", "opt4"], "answer": "JS"
+    },
+    {
+      "id": 2, "page": 3, "phase": "bid2", "buildable": true,
+      "score": [3, 5], "seat": "second", "turned_down": "H", "turned_down_card": "KH", "stick": false,
+      "hand": ["JS", "AC", "AD", "9H", "9D"],
+      "options": ["Bid D", "Bid S", "Bid C", "Pass"],
+      "answer": "Bid C", "answer_action": {"type": "call", "suit": "C", "alone": false},
+      "score_dependent": false,
+      "note": "Clubs gives JS(left bower)+AC = 2 strong trump; card-strength call."
+    },
+    {
+      "id": 3, "page": 4, "phase": "play", "buildable": false,
+      "score": [9, 9], "text": "You bid Diamonds (Next) from first seat; dealer turned down 9H. Lead first?",
+      "trump": "D", "hand": ["AH", "TH", "AS", "QC"], "options": ["AH", "TH", "AS", "QC"], "answer": "AS"
+    },
+    {
+      "id": 4, "page": 5, "phase": "bid1", "buildable": true,
+      "score": [6, 8], "seat": "third", "up_card": "JD", "stick": false,
+      "hand": ["AD", "QD", "TD", "9H", "AS"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Order Up", "answer_action": {"type": "orderup", "alone": false},
+      "score_dependent": false,
+      "note": "3 diamonds (A-Q-T) + off-ace; card-strength order."
+    },
+    {
+      "id": 5, "page": 6, "phase": "bid1", "buildable": true,
+      "score": [5, 6], "seat": "dealer", "up_card": "QD", "stick": false,
+      "hand": ["AC", "TD", "9D", "QS", "9H"],
+      "options": ["Pass", "Pick up the Queen"],
+      "answer": "Pick up the Queen", "answer_action": {"type": "orderup", "alone": false},
+      "score_dependent": true,
+      "note": "Picking up QD makes Q-T-9 of diamonds; marginal, mild score influence."
+    },
+    {
+      "id": 6, "page": 7, "phase": "bid1", "buildable": true,
+      "score": [6, 6], "seat": "first", "up_card": "KH", "stick": false,
+      "hand": ["AD", "AH", "AS", "9H", "9D"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Pass", "answer_action": {"type": "pass"},
+      "score_dependent": false,
+      "note": "Only 2 hearts (A-9) if ordered, and you'd hand dealer the KH; 3 off-aces not enough. Pass."
+    },
+    {
+      "id": 7, "page": 7, "phase": "bid1", "buildable": true,
+      "score": [9, 6], "seat": "first", "up_card": "AC", "stick": false,
+      "hand": ["9D", "TD", "QD", "9H", "9S"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Order Up", "answer_action": {"type": "orderup", "alone": false},
+      "score_dependent": true,
+      "note": "ZERO trump if clubs ordered -- this is a DONATION at 9-6. Pure score play; model cannot see score."
+    },
+    {
+      "id": 8, "page": 8, "phase": "play", "buildable": false,
+      "text": "Dealer alone in Hearts. Partner (first seat) leads AS. What do you play?",
+      "trump": "H", "hand": ["AH", "9H", "QC", "AD", "KC"], "options": ["AH", "9H", "QC", "AD", "KC"], "answer": "AH"
+    },
+    {
+      "id": 9, "page": 10, "phase": "play", "buildable": false,
+      "score": [9, 8], "text": "3rd seat, ordered up KH. Trick1: partner 9C, S2 wins AC, you KC, dealer 9D. S2 leads AS, you trump with Right (JH). Lead next?",
+      "trump": "H", "hand": ["JD", "QH", "AD"], "options": ["JD", "QH", "AD"], "answer": "JD"
+    },
+    {
+      "id": 10, "page": 12, "phase": "discard", "buildable": false,
+      "text": "Partner orders you to pick up AD (diamonds trump). Discard?",
+      "trump": "D", "hand": ["9D", "KH", "QH", "AC", "KC", "AD"], "options": ["9D", "KH", "QH", "AC", "KC"], "answer": "QH"
+    },
+    {
+      "id": 11, "page": 13, "phase": "bid2", "buildable": true,
+      "score": [3, 4], "seat": "first", "turned_down": "D", "turned_down_card": "AD", "stick": false,
+      "hand": ["9H", "TH", "QH", "9D", "9S"],
+      "options": ["Bid H", "Bid S", "Bid C", "Pass"],
+      "answer": "Bid H", "answer_action": {"type": "call", "suit": "H", "alone": false},
+      "score_dependent": false,
+      "note": "3 hearts (Q-T-9); card-strength call."
+    },
+    {
+      "id": 12, "page": 13, "phase": "bid1", "buildable": true,
+      "score": [9, 8], "seat": "first", "up_card": "9D", "stick": false,
+      "hand": ["AD", "KD", "QD", "AS", "QH"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Order Up", "answer_action": {"type": "orderup", "alone": false},
+      "score_dependent": false,
+      "note": "3 diamonds A-K-Q + off-ace; strong order."
+    },
+    {
+      "id": 13, "page": 14, "phase": "bid2", "buildable": true,
+      "score": [8, 9], "seat": "first", "turned_down": "D", "turned_down_card": "9D", "stick": true,
+      "seat_assumed": true,
+      "hand": ["JH", "JD", "JS", "JC", "AS"],
+      "options": ["Bid H", "Bid S", "Bid C", "Pass"],
+      "answer": "Pass", "answer_action": {"type": "pass"},
+      "score_dependent": true,
+      "note": "TRIPLE-INVALID for this net: score-dependent + stick-the-dealer (never trained) + seat not stated in quiz (assumed first). Four jacks = only ever 2 bowers whatever you call."
+    },
+    {
+      "id": 14, "page": 15, "phase": "bid2", "buildable": true,
+      "score": [4, 5], "seat": "second", "turned_down": "D", "turned_down_card": "AD", "stick": false,
+      "hand": ["JC", "AS", "AH", "KD", "9D"],
+      "options": ["Bid H", "Bid S", "Bid C", "Pass"],
+      "answer": "Bid S", "answer_action": {"type": "call", "suit": "S", "alone": false},
+      "score_dependent": false,
+      "note": "Spades: AS + JC(left bower) = 2 trump; card-strength call."
+    },
+    {
+      "id": 15, "page": 16, "phase": "play", "buildable": false,
+      "text": "Partner (3rd seat) orders dealer to pick up 9D (diamonds trump). Lead?",
+      "trump": "D", "hand": ["JH", "TD", "QH", "AC", "KC"], "options": ["JH", "TD", "QH", "AC", "KC"], "answer": "JH"
+    },
+    {
+      "id": 16, "page": 17, "phase": "bid2", "buildable": true,
+      "score": [9, 4], "seat": "first", "turned_down": "S", "turned_down_card": "KS", "stick": false,
+      "hand": ["JS", "JC", "AD", "KD", "QD"],
+      "options": ["Bid C (Next)", "Play C Alone", "Pass"],
+      "answer": "Play C Alone", "answer_action": {"type": "call", "suit": "C", "alone": true},
+      "score_dependent": true,
+      "note": "Clubs: JC(right)+JS(left) = 2 bowers + 3 off diamonds. The 'alone' is score-driven (9-4, close it out); model can't see score."
+    },
+    {
+      "id": 17, "page": 18, "phase": "play", "buildable": false,
+      "score": [4, 3], "text": "You (dealer) picked JS (spades trump). S1 leads AD, all follow, you trump with KS. Lead next?",
+      "trump": "S", "hand": ["JS", "KS", "AH", "9H", "KC"], "options": ["JS", "AH", "9H", "KC"], "answer": "JS"
+    },
+    {
+      "id": 18, "page": 19, "phase": "discard", "buildable": false,
+      "text": "Dealer turns up JC, picking up and going ALONE (clubs trump). Discard?",
+      "trump": "C", "hand": ["JS", "TC", "AS", "AD", "KD", "JC"], "options": ["JS", "TC", "AS", "AD", "KD"], "answer": "AS"
+    },
+    {
+      "id": 19, "page": 21, "phase": "discard", "buildable": false,
+      "text": "You are dealer; partner orders up JC (clubs trump). Discard?",
+      "trump": "C", "hand": ["AH", "KH", "AD", "QD", "AS", "JC"], "options": ["AH", "KH", "AD", "QD", "AS"], "answer": "QD"
+    },
+    {
+      "id": 20, "page": 22, "phase": "play", "buildable": false,
+      "text": "2nd seat; 3rd going alone in Hearts. Lead?",
+      "trump": "H", "hand": ["JS", "TC", "TD", "AS", "KC"], "options": ["JS", "TC", "TD", "AS", "KC"], "answer": "TD"
+    },
+    {
+      "id": 21, "page": 23, "phase": "play", "buildable": false,
+      "text": "Partner picked up AH (hearts trump). S1 leads TC, you win with your only Ace, S3 follows, partner throws 10S. You hold no trump. Lead back which suit?",
+      "trump": "H", "options": ["Diamonds", "Spades", "Clubs"], "answer": "Diamonds"
+    },
+    {
+      "id": 22, "page": 24, "phase": "bid1", "buildable": true,
+      "score": [5, 4], "seat": "dealer", "up_card": "JS", "stick": false,
+      "hand": ["9S", "KC", "AD", "KD", "9H"],
+      "options": ["Pick up Jack", "Play Spades Alone", "Pass"],
+      "answer": "Pick up Jack", "answer_action": {"type": "orderup", "alone": false},
+      "score_dependent": true,
+      "note": "Picking up JS gives right bower + 9S = 2 trump; marginal, mild score influence."
+    },
+    {
+      "id": 23, "page": 25, "phase": "play", "buildable": false,
+      "text": "2nd seat ordered partner (dealer) to pick up 9S (spades trump). S1 leads 9D. What do you play?",
+      "trump": "S", "hand": ["AH", "JH", "9H", "JC", "AS"], "options": ["AH", "JH", "9H", "JC", "AS"], "answer": "9H"
+    },
+    {
+      "id": 24, "page": 26, "phase": "bid2", "buildable": true,
+      "score": [9, 5], "seat": "second", "turned_down": "H", "turned_down_card": "JH", "stick": false,
+      "hand": ["QH", "TC", "KS", "TS", "AD"],
+      "options": ["Bid D", "Bid S", "Bid C", "Pass"],
+      "answer": "Bid S", "answer_action": {"type": "call", "suit": "S", "alone": false},
+      "score_dependent": true,
+      "note": "Spades only K-T (no bower); weak call, likely score/position driven (9-5, partner dealer)."
+    },
+    {
+      "id": 25, "page": 27, "phase": "play", "buildable": false,
+      "score": [3, 3], "text": "Partner (dealer) picked KH (hearts trump). S1 leads TD, you win with Ace, S3 follows. Play next?",
+      "trump": "H", "hand": ["KS", "QC", "TS", "QH"], "options": ["KS", "QC", "TS", "QH"], "answer": "QH"
+    }
+  ]
+}

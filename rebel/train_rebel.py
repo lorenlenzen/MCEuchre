@@ -23,16 +23,19 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from euchre.actions import NUM_ACTIONS, action_to_index
+from euchre.actions import Call, NUM_ACTIONS, OrderUp, Pass, action_to_index
+from euchre.cards import Suit
 from euchre.game import EuchreState, Phase, team_of
 from euchre.infoset import observation_tensor, OBS_SIZE
+from .evaluate import PointCountAgent
 from .networks import PolicyValueNet
+from .pimc import rollout_value
 from .subgame import SubgameSolver
 
 
@@ -66,6 +69,12 @@ class Sample:
     mask: np.ndarray         # legal-action mask
     policy: np.ndarray       # CFR target distribution over NUM_ACTIONS
     value: float             # CFR root value, actor's-team differential
+    cluster_key: Any = "unknown"  # groups similar decisions for prioritized
+                                   # replay sampling (see ReBeLTrainer)
+    supervise_policy: bool = True  # False for value-only grounding samples
+                                    # (see _grounded_value_sample) -- their
+                                    # `policy` field is a placeholder, never
+                                    # trained on
 
 
 class ReBeLTrainer:
@@ -73,15 +82,96 @@ class ReBeLTrainer:
                  depth_limit: int = 4, num_worlds: int = 8,
                  cfr_iterations: int = 20, lr: float = 1e-3,
                  buffer_size: int = 20000, belief_model=None,
-                 full_depth_cards: int = 0, seed: int = 0) -> None:
+                 full_depth_cards: int = 0, seed: int = 0,
+                 bid_depth_limit: Optional[int] = None,
+                 stick_the_dealer: bool = False,
+                 grad_clip_norm: float = 5.0,
+                 round2_seed_frac: float = 0.0,
+                 value_ground_frac: float = 0.0) -> None:
         self.net = net or PolicyValueNet()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
+        # Safety net, not a tuning knob: caps the gradient norm of any single
+        # train_step so one high-loss batch can't produce an outsized update.
+        # Matters more now that prioritized replay deliberately biases
+        # sampling toward the highest-loss clusters -- if one of those turns
+        # out to be irreducibly noisy rather than genuinely learnable (see
+        # cluster_stats), this bounds the damage to the update size, the same
+        # way priority_ceiling bounds it to the sampling rate.
+        self.grad_clip_norm = grad_clip_norm
         self.depth_limit = depth_limit
+        # Bidding decisions (BID_ROUND_1/2, DEALER_DISCARD) are the furthest
+        # in the game tree from the only exact solves this trainer ever does
+        # (the last full_depth_cards tricks of PLAY), so at the shared
+        # depth_limit they lean almost entirely on the value net's guess of
+        # how the rest of the hand plays out. Letting bidding search deeper
+        # gives it more real CFR-solved lookahead before falling back to the
+        # net. None = fall back to depth_limit (unchanged behaviour).
+        self.bid_depth_limit = bid_depth_limit
+        # Off by default: EuchreState.new_hand() then lets round 2 fully pass
+        # out into a misdeal, so self-play never faces a forced call. Turning
+        # this on trains that decision instead of leaving it unseen.
+        self.stick_the_dealer = stick_the_dealer
+        # Round 2 only happens after all four players pass round 1, so
+        # natural random dealing reaches it in ~5% of hands (measured) --
+        # exactly the decision type most in need of training signal and the
+        # slowest one to accumulate it. Biasing a fraction of *deals* so the
+        # up-card's suit is weak for all four hands raises the prior
+        # probability that round 1 naturally resolves into round 2, without
+        # ever skipping round 1's own decisions -- every player's round-1
+        # turn still gets a real SubgameSolver call and a real Sample; round
+        # 2 is only reached if the *actual current strategy* genuinely
+        # passes all four times, same as an unbiased deal, just more often.
+        # (An earlier version fast-forwarded straight to round 2 instead --
+        # that generated zero round-1 samples for those hands and was
+        # replaced with this.) Later diagnosis found round 2's real scarcity
+        # (measured ~0.67% single-trajectory rate, not the ~5% initially
+        # assumed) is mostly a *symptom* of round-1 over-calling (the net
+        # called on ~57% of random hands vs. a sensible ~12% baseline), not
+        # a sampling problem this alone fixes -- see value_ground_frac below
+        # for the fix aimed at the actual root cause.
+        self.round2_seed_frac = round2_seed_frac
+        # A continuous, low-weight anchor against the self-referential
+        # bootstrap drift diagnosed this session: the value head was found
+        # to overestimate post-call outcomes by roughly half a point to a
+        # full point on average, because nothing outside the last
+        # full_depth_cards tricks ever checks its leaf estimates against
+        # reality. Mixes a fraction of _grounded_value_sample() calls
+        # (exact rollout_value on a genuine post-call state, no CFR, no
+        # value-net dependency) into self-play -- value-only supervision
+        # (see Sample.supervise_policy), never policy, since rollout_value's
+        # own double-dummy assumption has a real bias of its own (overvalues
+        # the defense relative to real imperfect-information opponents) --
+        # good for correcting gross miscalibration, not for fine policy
+        # tuning. Off by default.
+        self.value_ground_frac = value_ground_frac
         self.num_worlds = num_worlds
         self.cfr_iterations = cfr_iterations
         self.buffer: List[Sample] = []
         self.buffer_size = buffer_size
         self.belief_model = belief_model
+        # Prioritized replay, grouped by cluster key instead of per sample:
+        # far less state to track (a few dozen hand-strength buckets, not one
+        # priority per buffer entry), and a fresh sample in a weak bucket
+        # inherits that bucket's known priority immediately instead of
+        # starting cold the way per-sample PER does. `by_key` mirrors
+        # `buffer`, partitioned; `cluster_priority` is an EMA of per-sample
+        # loss for each key, updated in train_step.
+        self.by_key: Dict[Any, List[Sample]] = {}
+        self.cluster_priority: Dict[Any, float] = {}
+        self.priority_alpha = 0.5    # 0 = ignore priority, 1 = fully proportional
+        self.priority_ema = 0.3      # weight on the newest loss observation
+        self.priority_floor = 0.05   # keeps a "mastered" cluster from starving
+        self.priority_default = 1.0  # neutral: makes weighting reduce to plain
+                                      # size-proportional (== uniform-over-buffer)
+                                      # sampling until a cluster's loss is known
+        # Safety valve: loss can stay persistently high for a cluster that's
+        # genuinely still learnable, but also for one that's irreducibly noisy
+        # (e.g. targets generated from different value-net snapshots over the
+        # run, or a position with a genuinely high-entropy equilibrium) --
+        # this can't tell those apart, so cap how far any one cluster can be
+        # oversampled relative to a "typical" one rather than trying to.
+        self.priority_ceiling_mult = 10.0
+        self._point_count = PointCountAgent()
         # "As much depth as feasible per position": when the acting player has
         # <= full_depth_cards cards left, solve the subgame to *terminal* (exact
         # CFR targets, no value net) since the tree is then cheap. Deeper into
@@ -95,7 +185,31 @@ class ReBeLTrainer:
                 and len(state.hands[state.current_player])
                 <= self.full_depth_cards):
             return None  # full-depth / exact
+        if state.phase in (Phase.BID_ROUND_1, Phase.BID_ROUND_2,
+                           Phase.DEALER_DISCARD):
+            return (self.bid_depth_limit if self.bid_depth_limit is not None
+                    else self.depth_limit)
         return self.depth_limit
+
+    _BUCKET_WIDTH = 0.4  # PointCountAgent's thresholds are 2.2/2.4/3.6, so this
+                         # gives ~11 buckets over the practical [0, ~4.5] range
+
+    def _cluster_key(self, state: EuchreState, actor: int) -> Any:
+        """Group a decision into a rough hand-strength bucket for prioritized
+        replay. Only bidding phases get fine-grained buckets, via the same
+        point-count score used by PointCountAgent -- that's the axis the quiz
+        scorecard actually showed weakness on (under-calling marginal
+        ace-heavy hands, spurious alone calls). Discard/play get one coarse
+        bucket each for now; no diagnosed weakness there yet to target."""
+        hand = state.hands[actor]
+        if state.phase == Phase.BID_ROUND_1:
+            score = self._point_count.hand_score(hand, state.up_card.suit)
+            return ("bid1", int(score // self._BUCKET_WIDTH))
+        if state.phase == Phase.BID_ROUND_2:
+            score = max(self._point_count.hand_score(hand, s) for s in Suit
+                       if s != state.turned_down)
+            return ("bid2", int(score // self._BUCKET_WIDTH))
+        return (state.phase.name,)
 
     # -- leaf value from the current network ---------------------------------
 
@@ -110,9 +224,88 @@ class ReBeLTrainer:
 
     # -- self-play -----------------------------------------------------------
 
+    def _fresh_deal(self) -> EuchreState:
+        return EuchreState.new_hand(
+            dealer=self.rng.randint(0, 3),
+            stick_the_dealer=self.stick_the_dealer).deal(self.rng)
+
+    # ORDER_1_THRESH (2.2) is where PointCountAgent itself calls -- 86% of
+    # random first-actor hands already score under it (measured), so
+    # filtering there barely biases anything and sits right at the
+    # ambiguous boundary where a reasonably-calibrated bid1 policy has real
+    # reason to mix rather than confidently pass. This needs hands that are
+    # unambiguously weak, not merely "under the calling line" -- close to
+    # the scoring floor (5 off-suit junk cards score 0.15, the minimum
+    # possible), not the decision boundary.
+    _ROUND2_BIAS_MAX_SCORE = 0.3  # ~4.8% of hands qualify (measured)
+
+    def _biased_deal(self, max_tries: int = 200) -> EuchreState:
+        """Deal, rejecting and redealing until the *first-to-act* hand is
+        unambiguously weak for the up-card's suit -- raises the odds round 1
+        genuinely resolves toward round 2, without touching how round 1
+        itself gets decided or recorded, and without needing all four hands
+        to qualify (only checking the first actor is both simpler and a much
+        higher acceptance rate). Falls back to a normal deal if no
+        qualifying deal turns up within the try budget."""
+        for _ in range(max_tries):
+            state = self._fresh_deal()
+            suit = state.up_card.suit
+            first = state.current_player
+            if (self._point_count.hand_score(state.hands[first], suit)
+                    <= self._ROUND2_BIAS_MAX_SCORE):
+                return state
+        return self._fresh_deal()
+
+    # Matches recalibrate_value.py's default -- round 2 is the specific spot
+    # this session's diagnosis traced the bias to, so it stays deliberately
+    # over-represented relative to its natural (~1%) frequency here too.
+    _VALUE_GROUND_ROUND2_FRAC = 0.3
+
+    def _grounded_value_sample(self) -> Optional[Sample]:
+        """One exact rollout_value-grounded post-call sample, built the same
+        way recalibrate_value.py's build_samples() does -- a real deal, a
+        real call (round 1 directly, or round 2 via four genuine passes),
+        then the exact double-dummy value of the resulting state. No CFR, no
+        dependence on the value net currently being trained, so it can't
+        inherit that net's own bias. Returns None on the (rare, defensive)
+        case a round-2 walk doesn't land on a callable state -- callers
+        should just skip storing anything that turn rather than retry, to
+        avoid a hidden retry loop on a state space we already know is thin."""
+        state = self._fresh_deal()
+        if self.rng.random() < self._VALUE_GROUND_ROUND2_FRAC:
+            for _ in range(4):
+                state = state.apply(Pass())
+            if state.phase != Phase.BID_ROUND_2:
+                return None
+            calls = [a for a in state.legal_actions()
+                     if isinstance(a, Call) and not a.alone]
+            if not calls:
+                return None
+            nxt = state.apply(self.rng.choice(calls))
+        else:
+            nxt = state.apply(OrderUp(alone=False))
+
+        v0 = rollout_value(nxt)  # exact -- all 4 hands already known
+        leaf_player = nxt.current_player
+        target = v0 if team_of(leaf_player) == 0 else -v0
+        return Sample(
+            obs=observation_tensor(nxt, leaf_player),
+            mask=legal_mask(nxt),
+            policy=np.zeros(NUM_ACTIONS, dtype=np.float32),  # unused, see
+                                                              # supervise_policy
+            value=target,
+            cluster_key=("value_ground",),
+            supervise_policy=False)
+
     def self_play_hand(self) -> Tuple[int, int]:
-        state = EuchreState.new_hand(
-            dealer=self.rng.randint(0, 3)).deal(self.rng)
+        if self.value_ground_frac > 0 and self.rng.random() < self.value_ground_frac:
+            gs = self._grounded_value_sample()
+            if gs is not None:
+                self._store(gs)
+        if self.round2_seed_frac > 0 and self.rng.random() < self.round2_seed_frac:
+            state = self._biased_deal()
+        else:
+            state = self._fresh_deal()
         while not state.is_terminal():
             legal = state.legal_actions()
             if len(legal) == 1:
@@ -136,7 +329,8 @@ class ReBeLTrainer:
                 obs=observation_tensor(state, actor),
                 mask=legal_mask(state),
                 policy=target,
-                value=actor_val))
+                value=actor_val,
+                cluster_key=self._cluster_key(state, actor)))
 
             actions = list(policy)
             chosen = self.rng.choices(
@@ -146,19 +340,96 @@ class ReBeLTrainer:
 
     def _store(self, sample: Sample) -> None:
         self.buffer.append(sample)
+        self.by_key.setdefault(sample.cluster_key, []).append(sample)
         if len(self.buffer) > self.buffer_size:
-            self.buffer.pop(0)
+            old = self.buffer.pop(0)
+            # `buffer` and each `by_key[k]` list are both append-only, so the
+            # globally oldest sample is always at index 0 of its own key's
+            # list too -- no scan needed to find it.
+            lst = self.by_key.get(old.cluster_key)
+            if lst:
+                (lst.pop(0) if lst[0] is old else lst.remove(old))
+                if not lst:
+                    del self.by_key[old.cluster_key]
 
     # -- learning ------------------------------------------------------------
 
+    def _cluster_weights(self) -> Tuple[List[Any], List[float]]:
+        """Sampling weight per known cluster key: size * min(priority, ceiling)^alpha.
+
+        Shared by `_sample_batch` (actual sampling) and `cluster_stats`
+        (diagnostics) so the reported sample share always matches what's
+        really drawn -- one source of truth for the formula.
+
+        The ceiling is relative, not a fixed number: a multiple of the
+        median *measured* priority, so it adapts as the overall loss level
+        drops over training instead of needing manual retuning. Guards
+        against a cluster whose loss stays high for irreducible reasons
+        (moving bootstrap targets, a genuinely high-entropy equilibrium)
+        rather than genuinely-still-learnable ones -- this can't tell those
+        apart, so it just bounds the worst case instead.
+        """
+        keys = list(self.by_key.keys())
+        if not keys:
+            return [], []
+        measured = list(self.cluster_priority.values())
+        typical = (sorted(measured)[len(measured) // 2] if measured
+                  else self.priority_default)
+        ceiling = max(typical * self.priority_ceiling_mult, self.priority_default)
+        weights = []
+        for k in keys:
+            p = max(self.cluster_priority.get(k, self.priority_default),
+                    self.priority_floor)
+            p = min(p, ceiling)
+            weights.append(len(self.by_key[k]) * p ** self.priority_alpha)
+        return keys, weights
+
+    def _sample_batch(self, n: int):
+        """Draw `n` samples, weighted by cluster priority.
+
+        Two-stage: pick a cluster key (weighted), then pick uniformly within
+        it -- O(num_keys + n) instead of scanning the whole buffer to build a
+        per-sample weight array (num_keys is a few dozen; the buffer can be
+        up to buffer_size). Weighting each key by `len(by_key[k])` alongside
+        its priority means a neutral/unmeasured priority (the default) makes
+        this mathematically equivalent to uniform sampling over the flat
+        buffer -- any skew comes only from the learned priority signal, not
+        from cluster granularity itself.
+        """
+        keys, weights = self._cluster_weights()
+        drawn_keys = self.rng.choices(keys, weights=weights, k=n)
+        return [self.rng.choice(self.by_key[k]) for k in drawn_keys], drawn_keys
+
+    def cluster_stats(self, top_n: int = 5) -> List[dict]:
+        """Diagnostic snapshot: the top clusters by *effective sample share*
+        (post-ceiling, matching what's actually drawn) -- not just raw
+        priority, so it's directly visible whether the ceiling is doing
+        anything and whether any cluster is dominating training."""
+        keys, weights = self._cluster_weights()
+        if not keys:
+            return []
+        total = sum(weights) or 1.0
+        rows = [
+            {"key": list(k) if isinstance(k, tuple) else k,
+             "priority": round(self.cluster_priority.get(k, self.priority_default), 3),
+             "count": len(self.by_key[k]),
+             "sample_share": round(w / total, 4)}
+            for k, w in zip(keys, weights)
+        ]
+        rows.sort(key=lambda r: -r["sample_share"])
+        return rows[:top_n]
+
     def train_step(self, batch_size: int = 128) -> dict:
         if not self.buffer:
-            return {"policy_loss": 0.0, "value_loss": 0.0}
-        batch = self.rng.sample(self.buffer, min(batch_size, len(self.buffer)))
+            return {"policy_loss": 0.0, "value_loss": 0.0, "grad_norm": 0.0}
+        n = min(batch_size, len(self.buffer))
+        batch, drawn_keys = self._sample_batch(n)
         obs = torch.from_numpy(np.stack([s.obs for s in batch]))
         mask = torch.from_numpy(np.stack([s.mask for s in batch]))
         target_p = torch.from_numpy(np.stack([s.policy for s in batch]))
         target_v = torch.tensor([s.value for s in batch], dtype=torch.float32)
+        supervise_p = torch.tensor([1.0 if s.supervise_policy else 0.0
+                                    for s in batch], dtype=torch.float32)
 
         logits, value = self.net(obs)
         logits = logits.masked_fill(~mask, float("-inf"))
@@ -166,15 +437,35 @@ class ReBeLTrainer:
         # Cross-entropy against the CFR target distribution (legal-only). Zero
         # out illegal entries so the target's 0 * (-inf) does not become NaN.
         logp = torch.where(mask, logp, torch.zeros_like(logp))
-        policy_loss = -(target_p * logp).sum(dim=-1).mean()
-        value_loss = F.mse_loss(value, target_v)
+        # Value-only grounding samples (supervise_policy=False) contribute
+        # nothing to policy_loss -- their `policy` field is a placeholder,
+        # never a real target -- and get excluded from the averaging
+        # denominator too, not just zeroed in the numerator.
+        per_policy_loss = -(target_p * logp).sum(dim=-1) * supervise_p
+        n_policy = supervise_p.sum().clamp(min=1.0)
+        per_value_loss = F.mse_loss(value, target_v, reduction="none")
+        policy_loss = per_policy_loss.sum() / n_policy
+        value_loss = per_value_loss.mean()
         loss = policy_loss + value_loss
 
         self.opt.zero_grad()
         loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.net.parameters(),
+                                                    self.grad_clip_norm)
         self.opt.step()
+
+        # Feed this batch's per-sample loss back into each drawn cluster's
+        # priority (EMA), so future batches lean toward clusters the net is
+        # currently getting wrong -- without tracking priority per sample.
+        per_sample_loss = (per_policy_loss + per_value_loss).detach().numpy()
+        for k, l in zip(drawn_keys, per_sample_loss):
+            old = self.cluster_priority.get(k, self.priority_default)
+            self.cluster_priority[k] = ((1 - self.priority_ema) * old
+                                        + self.priority_ema * float(l))
+
         return {"policy_loss": float(policy_loss.item()),
-                "value_loss": float(value_loss.item())}
+                "value_loss": float(value_loss.item()),
+                "grad_norm": float(grad_norm)}
 
     def train(self, generations: int, hands_per_gen: int = 4,
               train_steps: int = 8, batch_size: int = 128,
