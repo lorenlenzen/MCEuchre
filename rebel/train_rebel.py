@@ -76,6 +76,20 @@ def batch_value_fn_from_net(net: PolicyValueNet):
 # they're low-frequency calibration features, not the hot path the C++ port
 # targets, and rely on rollout_value, which isn't ported.
 def _cpp_module():
+    # mceuchre_cpp.cp314-*.pyd is a loose build artifact in the repo root
+    # (torch.utils.cpp_extension's build_ext --inplace output), not an
+    # installed package -- unlike euchre/rebel, which are always importable
+    # via this venv's editable install regardless of caller location.
+    # Running a script by path (e.g. `python scripts/train_parallel.py`)
+    # sets sys.path[0] to the SCRIPT's own directory (scripts/), not the
+    # repo root, so the bare `import mceuchre_cpp` below would raise
+    # ModuleNotFoundError there even though the extension is built -- add
+    # the repo root explicitly so this works regardless of what invoked it.
+    import os
+    import sys
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     try:
         import mceuchre_cpp
     except ImportError as e:  # pragma: no cover - environment-dependent
