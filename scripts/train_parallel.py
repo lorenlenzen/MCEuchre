@@ -88,13 +88,21 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         from rebel.match_equity import MatchEquityModel
         equity_model = MatchEquityModel.load(cfg["equity_table"])
 
+    engine = cfg.get("engine", "python")
+    # cpp.SubgameSolver's production constructor only supports uniform
+    # sample_determinization (see rebel/train_rebel.py's ReBeLTrainer
+    # engine='cpp' guard) -- belief_model reweighting isn't ported, so it's
+    # silently dropped rather than erroring when --engine cpp is chosen.
+    belief_model = BiddingBeliefModel() if engine == "python" else None
+
     t = ReBeLTrainer(
         net=PolicyValueNet(), num_worlds=cfg["worlds"],
         cfr_iterations=cfg["iters"], depth_limit=cfg["depth"],
         bid_depth_limit=cfg["bid_depth"],
-        full_depth_cards=cfg["fdc"], belief_model=BiddingBeliefModel(),
+        full_depth_cards=cfg["fdc"], belief_model=belief_model,
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
         value_ground_frac=cfg["value_ground"], equity_model=equity_model,
+        engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
     local_v = -1
     while not stop_flag.value:
@@ -215,10 +223,31 @@ def main():
     ap.add_argument("--eval-hands", type=int, default=200)
     ap.add_argument("--resume", type=str, default=None)
     ap.add_argument("--out", type=str, default="rebel_par")
+    ap.add_argument("--engine", choices=["python", "cpp"], default="python",
+                    help="actor self-play engine. 'cpp' uses the compiled "
+                         "hot-path port (cpp/, see cpp/README.md; must be "
+                         "built first: python setup.py build_ext --inplace) "
+                         "for the engine/observation/solver/CFR-search hot "
+                         "loop -- differentially verified bit-for-bit "
+                         "against the Python path in "
+                         "tests/test_cpp_equivalence.py. Drops belief_model "
+                         "reweighting (not ported) and is incompatible with "
+                         "--round2-seed-frac/--value-ground-frac (they "
+                         "depend on rollout_value, also not ported). The "
+                         "learner process (this one) always uses the "
+                         "Python engine regardless -- it only owns the "
+                         "buffer/train_step, never self-play.")
     args = ap.parse_args()
 
     from rebel.train_rebel import ReBeLTrainer
     from rebel.networks import PolicyValueNet
+
+    if args.engine == "cpp" and (args.round2_seed_frac > 0 or args.value_ground_frac > 0):
+        print("error: --engine cpp is incompatible with --round2-seed-frac/"
+              "--value-ground-frac (both depend on rollout_value, which "
+              "isn't ported to C++)", flush=True)
+        sys.exit(1)
+    print(f"actor engine: {args.engine}", flush=True)
 
     equity_table_path = None
     if not args.no_match_equity:
@@ -263,7 +292,8 @@ def main():
            "fdc": args.full_depth_cards, "stick": args.stick_the_dealer,
            "round2_seed": args.round2_seed_frac,
            "value_ground": args.value_ground_frac,
-           "equity_table": equity_table_path}
+           "equity_table": equity_table_path,
+           "engine": args.engine}
 
     actors = [ctx.Process(target=actor_loop,
                           args=(i, cfg, weights_path, version, samples_q,

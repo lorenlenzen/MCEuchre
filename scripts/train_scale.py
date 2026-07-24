@@ -72,7 +72,24 @@ def main() -> None:
     ap.add_argument("--out", type=str, default="rebel_scale")
     ap.add_argument("--resume", type=str, default=None,
                     help="checkpoint .pt to warm-start the net from")
+    ap.add_argument("--engine", choices=["python", "cpp"], default="python",
+                    help="self-play engine. 'cpp' uses the compiled "
+                         "hot-path port (cpp/, see cpp/README.md; must be "
+                         "built first: python setup.py build_ext --inplace), "
+                         "differentially verified bit-for-bit against the "
+                         "Python path in tests/test_cpp_equivalence.py. "
+                         "Drops belief_model reweighting (not ported) and "
+                         "is incompatible with --round2-seed-frac/"
+                         "--value-ground-frac (both depend on "
+                         "rollout_value, also not ported).")
     args = ap.parse_args()
+
+    if args.engine == "cpp" and (args.round2_seed_frac > 0 or args.value_ground_frac > 0):
+        print("error: --engine cpp is incompatible with --round2-seed-frac/"
+              "--value-ground-frac (both depend on rollout_value, which "
+              "isn't ported to C++)")
+        sys.exit(1)
+    print(f"self-play engine: {args.engine}")
 
     equity_model = None
     if not args.no_match_equity:
@@ -88,6 +105,12 @@ def main() -> None:
     else:
         print("match equity: off (--no-match-equity)")
 
+    # cpp.SubgameSolver's production constructor only supports uniform
+    # sample_determinization (see rebel/train_rebel.py's ReBeLTrainer
+    # engine='cpp' guard) -- belief_model reweighting isn't ported, so it's
+    # dropped rather than erroring when --engine cpp is chosen.
+    belief_model = BiddingBeliefModel() if args.engine == "python" else None
+
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
         depth_limit=args.depth_limit, bid_depth_limit=args.bid_depth_limit,
@@ -96,7 +119,7 @@ def main() -> None:
         grad_clip_norm=args.grad_clip_norm,
         round2_seed_frac=args.round2_seed_frac,
         value_ground_frac=args.value_ground_frac,
-        belief_model=BiddingBeliefModel(), lr=1e-3, seed=0)
+        belief_model=belief_model, engine=args.engine, lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")

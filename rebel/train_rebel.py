@@ -66,6 +66,51 @@ def batch_value_fn_from_net(net: PolicyValueNet):
     return fn
 
 
+# -- C++ hot-path engine (mceuchre_cpp) -------------------------------------
+# Optional, opt-in (ReBeLTrainer(engine="cpp")): the engine/observation/
+# solver/CFR-search/network hot path ported to C++ (see cpp/README.md), each
+# piece differentially verified bit-for-bit / float-tight against this same
+# pure-Python implementation (tests/test_cpp_equivalence.py). Only the
+# self_play_hand() hot loop is engine-aware -- round2_seed_frac and
+# value_ground_frac stay Python-only (see ReBeLTrainer.__init__) since
+# they're low-frequency calibration features, not the hot path the C++ port
+# targets, and rely on rollout_value, which isn't ported.
+def _cpp_module():
+    try:
+        import mceuchre_cpp
+    except ImportError as e:  # pragma: no cover - environment-dependent
+        raise ImportError(
+            "engine='cpp' requires the mceuchre_cpp extension to be built "
+            "(see cpp/README.md: python setup.py build_ext --inplace)") from e
+    return mceuchre_cpp
+
+
+def cpp_legal_mask(state) -> np.ndarray:
+    mask = np.zeros(NUM_ACTIONS, dtype=bool)
+    for a in state.legal_actions():
+        mask[a.index()] = True
+    return mask
+
+
+def cpp_batch_value_fn_from_net(net):
+    """Same as batch_value_fn_from_net, but for mceuchre_cpp.EuchreState
+    leaves -- team_of is player % 2 (engine.h), matching euchre.game.team_of
+    exactly, so no cpp call is needed for it here."""
+    cpp = _cpp_module()
+
+    def fn(states) -> List[float]:
+        players = [s.current_player if not s.is_terminal() else 0
+                   for s in states]
+        obs = np.stack([np.asarray(cpp.observation_tensor(s, p))
+                        for s, p in zip(states, players)])
+        with torch.no_grad():
+            _, v = net(torch.from_numpy(obs))
+        v = v.numpy()
+        return [float(v[i]) if players[i] % 2 == 0 else -float(v[i])
+                for i in range(len(states))]
+    return fn
+
+
 @dataclass
 class Sample:
     obs: np.ndarray          # observation from the actor's perspective
@@ -91,7 +136,33 @@ class ReBeLTrainer:
                  grad_clip_norm: float = 5.0,
                  round2_seed_frac: float = 0.0,
                  value_ground_frac: float = 0.0,
-                 equity_model: Optional["MatchEquityModel"] = None) -> None:
+                 equity_model: Optional["MatchEquityModel"] = None,
+                 engine: str = "python") -> None:
+        if engine not in ("python", "cpp"):
+            raise ValueError(f"engine must be 'python' or 'cpp', got {engine!r}")
+        if engine == "cpp" and (round2_seed_frac > 0 or value_ground_frac > 0):
+            # Both features go through rollout_value (rebel/pimc.py), which
+            # is deliberately Python-only (see the C++ port plan) -- rather
+            # than silently falling back to slow Python for just these
+            # calls, require the caller to pick one explicitly.
+            raise ValueError(
+                "round2_seed_frac/value_ground_frac require engine='python' "
+                "(they depend on rollout_value, which isn't ported to C++)")
+        if engine == "cpp" and belief_model is not None:
+            # cpp.SubgameSolver's production constructor only supports
+            # uniform sample_determinization, not belief_model reweighting
+            # (rebel/belief_model.py isn't ported).
+            raise ValueError("belief_model requires engine='python'")
+        self.engine = engine
+        self._cpp = _cpp_module() if engine == "cpp" else None
+        # A cpp.MatchEquityModel mirror of `equity_model` (built once, not
+        # per-hand): self.equity_model itself stays the Python object always
+        # -- it's still used for .sample_score() in _fresh_deal, which is
+        # pure Python and engine-independent -- but cpp.SubgameSolver needs
+        # its own cpp-side equity model instance for equity-aware CFR.
+        self._cpp_equity_model = (
+            self._cpp.MatchEquityModel(equity_model.target, equity_model.table.flatten().tolist())
+            if engine == "cpp" and equity_model is not None else None)
         self.net = net or PolicyValueNet()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         # Safety net, not a tuning knob: caps the gradient norm of any single
@@ -193,13 +264,22 @@ class ReBeLTrainer:
         self.full_depth_cards = full_depth_cards
         self.rng = random.Random(seed)
 
-    def _depth_for(self, state: EuchreState) -> Optional[int]:
-        if (self.full_depth_cards > 0 and state.phase == Phase.PLAY
-                and len(state.hands[state.current_player])
-                <= self.full_depth_cards):
+    def _depth_for(self, state) -> Optional[int]:
+        is_play = (state.phase == self._cpp.Phase.Play if self.engine == "cpp"
+                  else state.phase == Phase.PLAY)
+        if self.engine == "cpp":
+            hand_size = state.hands[state.current_player].bit_count()  # bitmask, not a list
+        else:
+            hand_size = len(state.hands[state.current_player])
+        if (self.full_depth_cards > 0 and is_play
+                and hand_size <= self.full_depth_cards):
             return None  # full-depth / exact
-        if state.phase in (Phase.BID_ROUND_1, Phase.BID_ROUND_2,
-                           Phase.DEALER_DISCARD):
+        is_bid_or_discard = (
+            state.phase in (self._cpp.Phase.BidRound1, self._cpp.Phase.BidRound2,
+                            self._cpp.Phase.DealerDiscard) if self.engine == "cpp"
+            else state.phase in (Phase.BID_ROUND_1, Phase.BID_ROUND_2,
+                                 Phase.DEALER_DISCARD))
+        if is_bid_or_discard:
             return (self.bid_depth_limit if self.bid_depth_limit is not None
                     else self.depth_limit)
         return self.depth_limit
@@ -207,13 +287,33 @@ class ReBeLTrainer:
     _BUCKET_WIDTH = 0.4  # PointCountAgent's thresholds are 2.2/2.4/3.6, so this
                          # gives ~11 buckets over the practical [0, ~4.5] range
 
-    def _cluster_key(self, state: EuchreState, actor: int) -> Any:
+    def _cluster_key(self, state, actor: int) -> Any:
         """Group a decision into a rough hand-strength bucket for prioritized
         replay. Only bidding phases get fine-grained buckets, via the same
         point-count score used by PointCountAgent -- that's the axis the quiz
         scorecard actually showed weakness on (under-calling marginal
         ace-heavy hands, spurious alone calls). Discard/play get one coarse
-        bucket each for now; no diagnosed weakness there yet to target."""
+        bucket each for now; no diagnosed weakness there yet to target.
+
+        Cluster keys are only ever compared within one trainer's lifetime
+        (self.engine is fixed at construction), so it's fine that the cpp
+        branch's phase-name strings ("BidRound1") differ in spelling from
+        the Python branch's ("BID_ROUND_1") -- they never need to match
+        across engines, only to group consistently within one."""
+        if self.engine == "cpp":
+            from euchre.cards import Card as PyCard, Suit as PySuit
+            hand = [PyCard.from_id(c) for c in range(24) if (state.hands[actor] >> c) & 1]
+            if state.phase == self._cpp.Phase.BidRound1:
+                up_suit = PyCard.from_id(state.up_card).suit
+                score = self._point_count.hand_score(hand, up_suit)
+                return ("bid1", int(score // self._BUCKET_WIDTH))
+            if state.phase == self._cpp.Phase.BidRound2:
+                turned = PySuit(state.turned_down)
+                score = max(self._point_count.hand_score(hand, s) for s in PySuit
+                           if s != turned)
+                return ("bid2", int(score // self._BUCKET_WIDTH))
+            return (state.phase.name,)
+
         hand = state.hands[actor]
         if state.phase == Phase.BID_ROUND_1:
             score = self._point_count.hand_score(hand, state.up_card.suit)
@@ -226,24 +326,33 @@ class ReBeLTrainer:
 
     # -- leaf value from the current network ---------------------------------
 
-    def value_fn(self, state: EuchreState) -> float:
+    def value_fn(self, state) -> float:
         """Estimate a subgame leaf's value: team0 - team1 point differential,
         or (when equity_model is set) a team0-signed match win-probability
         delta -- whichever units the net is currently being trained to
         predict, since this just reads its raw output."""
         return self.batch_value_fn([state])[0]
 
-    def batch_value_fn(self, states: List[EuchreState]) -> List[float]:
+    def batch_value_fn(self, states) -> List[float]:
         """Value many leaves in a single network forward pass (see
-        ``batch_value_fn_from_net``)."""
+        ``batch_value_fn_from_net`` / ``cpp_batch_value_fn_from_net``)."""
+        if self.engine == "cpp":
+            return cpp_batch_value_fn_from_net(self.net)(states)
         return batch_value_fn_from_net(self.net)(states)
 
     # -- self-play -----------------------------------------------------------
 
-    def _fresh_deal(self) -> EuchreState:
+    def _fresh_deal(self):
         team0_score = team1_score = 0
         if self.equity_model is not None:
             team0_score, team1_score = self.equity_model.sample_score(self.rng)
+        if self.engine == "cpp":
+            deck = list(range(24))
+            self.rng.shuffle(deck)
+            return self._cpp.EuchreState.new_hand(
+                dealer=self.rng.randint(0, 3),
+                stick_the_dealer=self.stick_the_dealer,
+                team0_score=team0_score, team1_score=team1_score).deal_from_deck(deck)
         return EuchreState.new_hand(
             dealer=self.rng.randint(0, 3),
             stick_the_dealer=self.stick_the_dealer,
@@ -337,12 +446,19 @@ class ReBeLTrainer:
                 state = state.apply(legal[0])
                 continue
             actor = state.current_player
-            solver = SubgameSolver(
-                state, actor, num_worlds=self.num_worlds,
-                iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
-                batch_value_fn=self.batch_value_fn,
-                belief_model=self.belief_model, equity_model=self.equity_model,
-                rng=self.rng)
+            if self.engine == "cpp":
+                depth = self._depth_for(state)
+                solver = self._cpp.SubgameSolver(
+                    state, actor, self.num_worlds, self.cfr_iterations,
+                    -1 if depth is None else depth, self.batch_value_fn,
+                    self._cpp_equity_model, self.rng.getrandbits(63))
+            else:
+                solver = SubgameSolver(
+                    state, actor, num_worlds=self.num_worlds,
+                    iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
+                    batch_value_fn=self.batch_value_fn,
+                    belief_model=self.belief_model, equity_model=self.equity_model,
+                    rng=self.rng)
             solver.run()
             policy = solver.root_policy()
             # team0 - team1 raw points, or (equity_model set) a team0-signed
@@ -351,12 +467,20 @@ class ReBeLTrainer:
             root_val = solver.root_value()
 
             target = np.zeros(NUM_ACTIONS, dtype=np.float32)
-            for a, p in policy.items():
-                target[action_to_index(a)] = p
+            if self.engine == "cpp":
+                for idx, p in policy.items():
+                    target[idx] = p
+                obs = np.asarray(self._cpp.observation_tensor(state, actor))
+                mask = cpp_legal_mask(state)
+            else:
+                for a, p in policy.items():
+                    target[action_to_index(a)] = p
+                obs = observation_tensor(state, actor)
+                mask = legal_mask(state)
             actor_val = root_val if team_of(actor) == 0 else -root_val
             self._store(Sample(
-                obs=observation_tensor(state, actor),
-                mask=legal_mask(state),
+                obs=obs,
+                mask=mask,
                 policy=target,
                 value=actor_val,
                 cluster_key=self._cluster_key(state, actor)))
@@ -364,6 +488,8 @@ class ReBeLTrainer:
             actions = list(policy)
             chosen = self.rng.choices(
                 actions, weights=[policy[a] for a in actions])[0]
+            if self.engine == "cpp":
+                chosen = self._cpp.Action.from_index(chosen)
             state = state.apply(chosen)
         return state.returns()
 
