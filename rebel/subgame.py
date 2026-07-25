@@ -119,6 +119,8 @@ class SubgameSolver:
         self.equity_model = equity_model
         self.team0_score = root.team0_score
         self.team1_score = root.team1_score
+        # Fixed for the whole subgame too -- the deal doesn't change mid-hand.
+        self.dealer_is_team0 = team_of(root.dealer) == 0
         self.rng = rng or random.Random()
         self.infosets: Dict[str, _Info] = {}
         if belief_model is not None:
@@ -149,7 +151,8 @@ class SubgameSolver:
                 # (see rebel/match_equity.py's module docstring for why that
                 # can stay raw-point-based).
                 diff = self.equity_model.equity_delta(
-                    self.team0_score, self.team1_score, r[0], r[1])
+                    self.team0_score, self.team1_score, self.dealer_is_team0,
+                    r[0], r[1])
             else:
                 diff = r[0] - r[1]
             return _TNode(util=[diff if team_of(p) == 0 else -diff

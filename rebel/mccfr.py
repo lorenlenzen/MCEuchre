@@ -32,13 +32,15 @@ def _utility(state: EuchreState, player: int,
     r = state.returns()
     t = team_of(player)
     if equity_model is not None:
-        # Score is fixed for a hand's whole duration, so the terminal
-        # state's own team0_score/team1_score fields ARE the pre-hand score
-        # -- no separate threading needed. See SubgameSolver._build for the
-        # same conversion and why it belongs here (comparing expectations
-        # under CFR's regret matching) and not in solve_value/rollout_value.
+        # Score AND dealer are fixed for a hand's whole duration, so the
+        # terminal state's own team0_score/team1_score/dealer fields ARE the
+        # pre-hand values -- no separate threading needed. See
+        # SubgameSolver._build for the same conversion and why it belongs
+        # here (comparing expectations under CFR's regret matching) and not
+        # in solve_value/rollout_value.
+        dealer_is_team0 = team_of(state.dealer) == 0
         diff = equity_model.equity_delta(
-            state.team0_score, state.team1_score, r[0], r[1])
+            state.team0_score, state.team1_score, dealer_is_team0, r[0], r[1])
         return diff if t == 0 else -diff
     return float(r[t] - r[1 - t])
 
@@ -130,7 +132,14 @@ class MCCFRTrainer:
             d = self.rng.randint(0, 3) if dealer is None else dealer
             team0_score = team1_score = 0
             if self.equity_model is not None:
-                team0_score, team1_score = self.equity_model.sample_score(self.rng)
+                # sample_score draws (dealing team's score, other team's
+                # score) -- map onto team0/team1 using whichever team `d`
+                # actually is.
+                dealer_score, other_score = self.equity_model.sample_score(self.rng)
+                if team_of(d) == 0:
+                    team0_score, team1_score = dealer_score, other_score
+                else:
+                    team0_score, team1_score = other_score, dealer_score
             root = EuchreState.new_hand(dealer=d,
                                         stick_the_dealer=self.stick_the_dealer,
                                         team0_score=team0_score,

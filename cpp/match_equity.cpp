@@ -2,15 +2,21 @@
 
 namespace mceuchre {
 
-double MatchEquityModel::win_prob(int team0_score, int team1_score) const {
-    if (team0_score >= target_) return 1.0;
-    if (team1_score >= target_) return 0.0;
-    return at(team0_score, team1_score);
+double MatchEquityModel::win_prob(int my_score, int opp_score, bool am_i_dealer) const {
+    if (am_i_dealer) {
+        if (my_score >= target_) return 1.0;
+        if (opp_score >= target_) return 0.0;
+        return at(my_score, opp_score);
+    }
+    if (opp_score >= target_) return 0.0;
+    if (my_score >= target_) return 1.0;
+    return 1.0 - at(opp_score, my_score);
 }
 
-double MatchEquityModel::equity_delta(int team0_score, int team1_score, int p0, int p1) const {
-    double before = win_prob(team0_score, team1_score);
-    double after = win_prob(team0_score + p0, team1_score + p1);
+double MatchEquityModel::equity_delta(int team0_score, int team1_score, bool dealer_is_team0,
+                                      int p0, int p1) const {
+    double before = win_prob(team0_score, team1_score, dealer_is_team0);
+    double after = win_prob(team0_score + p0, team1_score + p1, !dealer_is_team0);
     return after - before;
 }
 

@@ -48,6 +48,7 @@ void SubgameSolver::init_common(const EuchreState& root, int actor, int iteratio
     equity_model_ = equity_model;
     team0_score_ = root.team0_score;
     team1_score_ = root.team1_score;
+    dealer_is_team0_ = team_of(root.dealer) == 0;
     root_key_ = infoset_key(root, actor);
 }
 
@@ -77,8 +78,9 @@ TNode* SubgameSolver::build(const EuchreState& state, int depth) {
 
     if (state.is_terminal()) {
         auto [p0, p1] = state.returns();
-        double diff = equity_model_ ? equity_model_->equity_delta(team0_score_, team1_score_, p0, p1)
-                                    : static_cast<double>(p0 - p1);
+        double diff = equity_model_
+            ? equity_model_->equity_delta(team0_score_, team1_score_, dealer_is_team0_, p0, p1)
+            : static_cast<double>(p0 - p1);
         for (int p = 0; p < 4; ++p) node->util[p] = (team_of(p) == 0) ? diff : -diff;
         node->has_util = true;
         return node;

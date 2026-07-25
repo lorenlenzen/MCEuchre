@@ -96,7 +96,9 @@ def rollout_value(state: EuchreState, memo: Optional[dict] = None,
             "rollout_value: equity_model requires both team0_score and "
             "team1_score")
         p0, p1 = (raw, 0) if raw >= 0 else (0, -raw)
-        return equity_model.equity_delta(team0_score, team1_score, p0, p1)
+        dealer_is_team0 = team_of(state.dealer) == 0
+        return equity_model.equity_delta(
+            team0_score, team1_score, dealer_is_team0, p0, p1)
     return raw
     raise ValueError(f"rollout_value cannot start from phase {state.phase}")
 

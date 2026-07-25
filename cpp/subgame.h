@@ -78,6 +78,7 @@ private:
     BatchValueFn batch_value_fn_;
     const MatchEquityModel* equity_model_ = nullptr;
     int team0_score_ = 0, team1_score_ = 0;
+    bool dealer_is_team0_ = true;  // fixed for the whole subgame -- the deal doesn't change mid-hand
 
     std::vector<EuchreState> worlds_;
     std::vector<double> weights_;

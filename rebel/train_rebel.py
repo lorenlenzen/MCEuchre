@@ -357,18 +357,25 @@ class ReBeLTrainer:
     # -- self-play -----------------------------------------------------------
 
     def _fresh_deal(self):
+        dealer = self.rng.randint(0, 3)
         team0_score = team1_score = 0
         if self.equity_model is not None:
-            team0_score, team1_score = self.equity_model.sample_score(self.rng)
+            # sample_score draws (dealing team's score, other team's score)
+            # -- map onto team0/team1 using whichever team `dealer` is.
+            dealer_score, other_score = self.equity_model.sample_score(self.rng)
+            if team_of(dealer) == 0:
+                team0_score, team1_score = dealer_score, other_score
+            else:
+                team0_score, team1_score = other_score, dealer_score
         if self.engine == "cpp":
             deck = list(range(24))
             self.rng.shuffle(deck)
             return self._cpp.EuchreState.new_hand(
-                dealer=self.rng.randint(0, 3),
+                dealer=dealer,
                 stick_the_dealer=self.stick_the_dealer,
                 team0_score=team0_score, team1_score=team1_score).deal_from_deck(deck)
         return EuchreState.new_hand(
-            dealer=self.rng.randint(0, 3),
+            dealer=dealer,
             stick_the_dealer=self.stick_the_dealer,
             team0_score=team0_score, team1_score=team1_score).deal(self.rng)
 

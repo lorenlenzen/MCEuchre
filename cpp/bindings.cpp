@@ -125,9 +125,11 @@ PYBIND11_MODULE(mceuchre_cpp, m) {
 
     py::class_<MatchEquityModel>(m, "MatchEquityModel")
         .def(py::init<int, std::vector<double>>(), py::arg("target"), py::arg("table_flat"))
-        .def("win_prob", &MatchEquityModel::win_prob, py::arg("team0_score"), py::arg("team1_score"))
+        .def("win_prob", &MatchEquityModel::win_prob,
+            py::arg("my_score"), py::arg("opp_score"), py::arg("am_i_dealer"))
         .def("equity_delta", &MatchEquityModel::equity_delta,
-            py::arg("team0_score"), py::arg("team1_score"), py::arg("p0"), py::arg("p1"))
+            py::arg("team0_score"), py::arg("team1_score"), py::arg("dealer_is_team0"),
+            py::arg("p0"), py::arg("p1"))
         .def("target", &MatchEquityModel::target);
 
     m.def("sample_determinization", &py_sample_determinization,

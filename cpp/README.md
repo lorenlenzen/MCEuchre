@@ -83,11 +83,14 @@ test_cpp_net_trains_via_rebel_trainer_and_checkpoint_interops`).
 
 **Engine selector**: `ReBeLTrainer(engine="cpp")` (`rebel/train_rebel.py`)
 routes the `self_play_hand()` hot loop -- state, observation, solver, CFR
-search -- through the C++ path. `belief_model`, `round2_seed_frac`, and
-`value_ground_frac` all depend on Python-only code (`rebel/belief_model.py`,
-`rebel/pimc.py`'s `rollout_value`) that wasn't ported, so `engine="cpp"`
-rejects them at construction rather than silently falling back to Python for
-just those calls. `net=` can be either a Python or C++ `PolicyValueNet`
+search -- through the C++ path. `belief_model` and `value_ground_frac`
+depend on Python-only code (`rebel/belief_model.py`, `rebel/pimc.py`'s
+`rollout_value`) that wasn't ported, so `engine="cpp"` rejects them at
+construction rather than silently falling back to Python for just those
+calls. `round2_seed_frac` is NOT in that category -- `_biased_deal` never
+calls `rollout_value`, it only needed engine-aware hand/up_card conversion
+(same pattern as `_cluster_key`), so it works fine with `engine="cpp"`.
+`net=` can be either a Python or C++ `PolicyValueNet`
 independently of `engine=` (leaf evaluation calls `net(obs)` generically
 either way); training the C++ net works via the ordinary `train_step`, no
 special-casing needed. `scripts/train_parallel.py` and

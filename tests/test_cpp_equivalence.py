@@ -381,9 +381,19 @@ def test_solve_value_matches_full_hand(seed):
 # --- MatchEquityModel vs rebel.match_equity ---------------------------------
 
 def test_match_equity_model_matches_python():
+    """Dealer-relative model (see rebel/match_equity.py's module docstring):
+    a single target x target table (Ed[a,b], the dealing team's win prob),
+    win_prob(my_score, opp_score, am_i_dealer) applies the non-dealing
+    identity 1 - Ed[opp,my] directly rather than storing a second table.
+    Exhaustive over all target*target*2 = 200 (a, b, am_i_dealer)
+    combinations -- cheap enough not to sample."""
     from rebel.match_equity import MatchEquityModel as PyModel, build_equity_table
 
-    dist = {(2, 0): 0.25, (0, 2): 0.25, (1, 0): 0.20, (0, 1): 0.20, (0, 0): 0.10}
+    # Deliberately asymmetric (a real dealer edge) so this test would catch a
+    # bug that only shows up when Ed != Eo, not just a coincidentally-neutral
+    # distribution where the dealer flag wouldn't matter either way.
+    dist = {(1, 0): 0.45, (0, 1): 0.25, (2, 0): 0.15, (0, 2): 0.05,
+            (4, 0): 0.02, (0, 0): 0.08}
     target = 10
     table = build_equity_table(dist, target=target)
     py_model = PyModel(table, dist)
@@ -391,20 +401,26 @@ def test_match_equity_model_matches_python():
 
     for a in range(target):
         for b in range(target):
-            py_wp = py_model.win_prob(a, b)
-            cpp_wp = cpp_model.win_prob(a, b)
-            assert abs(py_wp - cpp_wp) < 1e-12, f"win_prob({a},{b}) mismatch: {py_wp} vs {cpp_wp}"
+            for am_i_dealer in (True, False):
+                py_wp = py_model.win_prob(a, b, am_i_dealer)
+                cpp_wp = cpp_model.win_prob(a, b, am_i_dealer)
+                assert abs(py_wp - cpp_wp) < 1e-12, (
+                    f"win_prob({a},{b},{am_i_dealer}) mismatch: {py_wp} vs {cpp_wp}")
 
     for (p0, p1) in [(1, 0), (2, 0), (0, 1), (0, 2), (4, 0), (0, 4), (0, 0)]:
         for a in (0, 5, 9):
             for b in (0, 5, 9):
-                py_d = py_model.equity_delta(a, b, p0, p1)
-                cpp_d = cpp_model.equity_delta(a, b, p0, p1)
-                assert abs(py_d - cpp_d) < 1e-12, (
-                    f"equity_delta({a},{b},{p0},{p1}) mismatch: {py_d} vs {cpp_d}")
+                for dealer_is_team0 in (True, False):
+                    py_d = py_model.equity_delta(a, b, dealer_is_team0, p0, p1)
+                    cpp_d = cpp_model.equity_delta(a, b, dealer_is_team0, p0, p1)
+                    assert abs(py_d - cpp_d) < 1e-12, (
+                        f"equity_delta({a},{b},{dealer_is_team0},{p0},{p1}) "
+                        f"mismatch: {py_d} vs {cpp_d}")
 
-    assert cpp_model.win_prob(target, 3) == 1.0
-    assert cpp_model.win_prob(3, target) == 0.0
+    assert cpp_model.win_prob(target, 3, True) == 1.0
+    assert cpp_model.win_prob(3, target, True) == 0.0
+    assert cpp_model.win_prob(target, 3, False) == 1.0
+    assert cpp_model.win_prob(3, target, False) == 0.0
 
 
 # --- trump-table helpers vs euchre.cards -----------------------------------
@@ -529,6 +545,7 @@ def _bidding_worlds(seed, num_worlds=3, dealer=0, actor=1):
 def _py_solver_with_worlds(root, actor, worlds, weights, iterations, depth_limit,
                            batch_value_fn, equity_model):
     from rebel.subgame import SubgameSolver as PySubgameSolver
+    from euchre.game import team_of
     from euchre.infoset import infoset_key as py_infoset_key
 
     solver = PySubgameSolver.__new__(PySubgameSolver)
@@ -540,6 +557,7 @@ def _py_solver_with_worlds(root, actor, worlds, weights, iterations, depth_limit
     solver.equity_model = equity_model
     solver.team0_score = root.team0_score
     solver.team1_score = root.team1_score
+    solver.dealer_is_team0 = team_of(root.dealer) == 0
     solver.rng = random.Random(0)
     solver.infosets = {}
     solver.worlds = worlds
