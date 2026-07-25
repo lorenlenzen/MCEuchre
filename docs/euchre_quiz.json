@@ -1,10 +1,19 @@
 {
-  "_about": "Transcription of the Ohio Euchre Main Quiz (docs/Ohio Euchre answers.pdf) into a machine-readable form. Cards: rank in {9,T,J,Q,K,A} + suit in {C,D,H,S}, e.g. 'JS'=Jack of Spades, 'TD'=Ten of Diamonds. seat: which chair the answerer sits in relative to the dealer (first/second/third/dealer). 'turned_down' is set for round-2 (bid2) decisions = the up-card suit rejected in round 1. score is [you, them]. score_dependent flags answers whose correctness hinges on the game score, which the current net's observation encoding does NOT include (see docs/rebel_design.md 'Known gaps'). Likewise stick_the_dealer scenarios were never trained.",
+  "_about": "Transcription of the Ohio Euchre Main Quiz (docs/Ohio Euchre answers.pdf) into a machine-readable form. Cards: rank in {9,T,J,Q,K,A} + suit in {C,D,H,S}, e.g. 'JS'=Jack of Spades, 'TD'=Ten of Diamonds. seat: which chair the answerer sits in relative to the dealer (first/second/third/dealer); for play/discard questions, 'S1'/'S2'/'S3'/'partner'/'dealer' in the original text are aliases for the same bidding-order position (1-4, dealer=4). 'turned_down' is set for round-2 (bid2) decisions = the up-card suit rejected in round 1. score is [you, them]. score_dependent flags answers whose correctness hinges on the game score -- observation_tensor has carried a score channel since the match-equity work (see scripts/quiz_eval.py's module docstring), so these are now genuinely evaluated at their stated score, tallied separately from the 'fair' subset rather than excluded as uninformative. stick_the_dealer scenarios depend on the net having been trained with stick_the_dealer=True, true for some checkpoints, not others -- check before trusting a STICK-flagged result. Play-phase questions (build_play_state in scripts/quiz_eval.py) additionally use full_hand/accept/tricks/current_trick/discard fields to reconstruct the exact decision point via real engine replay, asserting narrated trick winners against the engine's own rules.",
   "questions": [
     {
-      "id": 1, "page": 2, "phase": "play", "buildable": false,
+      "id": 1, "page": 2, "phase": "play", "buildable": true,
       "score": [8, 9], "text": "Dealer turned down QC; you called next (spades) and lead JC. S2 plays 9C, S3 plays 9S, dealer plays AS. Lead next?",
-      "trump": "S", "hand": ["JS", "AH", "KD", "9D"], "options": ["JS", "AH", "KD", "opt4"], "answer": "JS"
+      "trump": "S", "hand": ["JS", "AH", "KD", "9D"], "options": ["JS", "AH", "KD", "9D"], "answer": "JS",
+      "seat": "first",
+      "full_hand": ["JS", "AH", "KD", "9D", "JC"],
+      "accept": {"round": 2, "orderer_seat": 1, "alone": false, "suit": "S", "turned_down": "C", "turned_down_card": "QC"},
+      "tricks": [
+        {"plays": [{"seat": 1, "card": "JC"}, {"seat": 2, "card": "9C"}, {"seat": 3, "card": "9S"}, {"seat": 4, "card": "AS"}], "winner": 1}
+      ],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "JS"},
+      "note": "S1-S4 are bidding-order seat aliases (see build_play_state in scripts/quiz_eval.py)."
     },
     {
       "id": 2, "page": 3, "phase": "bid2", "buildable": true,
@@ -16,9 +25,16 @@
       "note": "Clubs gives JS(left bower)+AC = 2 strong trump; card-strength call."
     },
     {
-      "id": 3, "page": 4, "phase": "play", "buildable": false,
+      "id": 3, "page": 4, "phase": "play", "buildable": true,
       "score": [9, 9], "text": "You bid Diamonds (Next) from first seat; dealer turned down 9H. Lead first?",
-      "trump": "D", "hand": ["AH", "TH", "AS", "QC"], "options": ["AH", "TH", "AS", "QC"], "answer": "AS"
+      "trump": "D", "hand": ["AH", "TH", "AS", "QC", "TC"], "options": ["AH", "TH", "AS", "QC", "TC"], "answer": "AS",
+      "seat": "first",
+      "full_hand": ["AH", "TH", "AS", "QC", "TC"],
+      "accept": {"round": 2, "orderer_seat": 1, "alone": false, "suit": "D", "turned_down": "H", "turned_down_card": "9H"},
+      "tricks": [],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "AS"},
+      "note": "5th hand card (10C) confirmed by user; missing from the source transcription."
     },
     {
       "id": 4, "page": 5, "phase": "bid1", "buildable": true,
@@ -57,19 +73,38 @@
       "note": "ZERO trump if clubs ordered -- this is a DONATION at 9-6. Pure score play; model cannot see score."
     },
     {
-      "id": 8, "page": 8, "phase": "play", "buildable": false,
+      "id": 8, "page": 8, "phase": "play", "buildable": true,
       "text": "Dealer alone in Hearts. Partner (first seat) leads AS. What do you play?",
-      "trump": "H", "hand": ["AH", "9H", "QC", "AD", "KC"], "options": ["AH", "9H", "QC", "AD", "KC"], "answer": "AH"
+      "trump": "H", "hand": ["AH", "9H", "QC", "AD", "KC"], "options": ["AH", "9H", "QC", "AD", "KC"], "answer": "AH",
+      "seat": "third",
+      "full_hand": ["AH", "9H", "QC", "AD", "KC"],
+      "accept": {"round": 1, "orderer_seat": 4, "alone": true, "up_card": "9C"},
+      "tricks": [],
+      "current_trick": [{"seat": 1, "card": "AS"}],
+      "answer_action": {"type": "play", "card": "AH"},
+      "note": "Dealer alone -> dealer's partner (bidding-seat 2) sits out; trick1 leader dealer+1 unaffected since seat2, not seat1, is sitting. up_card unstated by the quiz; arbitrary since PLAY-phase observation never re-exposes it once trump is set."
     },
     {
-      "id": 9, "page": 10, "phase": "play", "buildable": false,
+      "id": 9, "page": 10, "phase": "play", "buildable": true,
       "score": [9, 8], "text": "3rd seat, ordered up KH. Trick1: partner 9C, S2 wins AC, you KC, dealer 9D. S2 leads AS, you trump with Right (JH). Lead next?",
-      "trump": "H", "hand": ["JD", "QH", "AD"], "options": ["JD", "QH", "AD"], "answer": "JD"
+      "trump": "H", "hand": ["JD", "QH", "AD"], "options": ["JD", "QH", "AD"], "answer": "JD",
+      "seat": "third",
+      "full_hand": ["JD", "QH", "AD", "KC", "JH"],
+      "accept": {"round": 1, "orderer_seat": 3, "alone": false, "up_card": "KH"},
+      "tricks": [
+        {"plays": [{"seat": 1, "card": "9C"}, {"seat": 2, "card": "AC"}, {"seat": 3, "card": "KC"}, {"seat": 4, "card": "9D"}], "winner": 2},
+        {"plays": [{"seat": 2, "card": "AS"}, {"seat": 3, "card": "JH"}, {"seat": 4, "card": "TD"}, {"seat": 1, "card": "QD"}], "winner": 3}
+      ],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "JD"},
+      "note": "Trick2's dealer/partner plays (seats 4,1) are unnarrated -- right bower (JH) wins regardless of what they play, so the exact filler cards don't affect the outcome or the decision."
     },
     {
-      "id": 10, "page": 12, "phase": "discard", "buildable": false,
+      "id": 10, "page": 12, "phase": "discard", "buildable": true,
       "text": "Partner orders you to pick up AD (diamonds trump). Discard?",
-      "trump": "D", "hand": ["9D", "KH", "QH", "AC", "KC", "AD"], "options": ["9D", "KH", "QH", "AC", "KC"], "answer": "QH"
+      "trump": "D", "up_card": "AD", "orderer": "partner", "alone": false,
+      "hand": ["9D", "KH", "QH", "AC", "KC", "AD"], "options": ["9D", "KH", "QH", "AC", "KC"], "answer": "QH",
+      "answer_action": {"type": "discard", "card": "QH"}
     },
     {
       "id": 11, "page": 13, "phase": "bid2", "buildable": true,
@@ -109,9 +144,15 @@
       "note": "Spades: AS + JC(left bower) = 2 trump; card-strength call."
     },
     {
-      "id": 15, "page": 16, "phase": "play", "buildable": false,
+      "id": 15, "page": 16, "phase": "play", "buildable": true,
       "text": "Partner (3rd seat) orders dealer to pick up 9D (diamonds trump). Lead?",
-      "trump": "D", "hand": ["JH", "TD", "QH", "AC", "KC"], "options": ["JH", "TD", "QH", "AC", "KC"], "answer": "JH"
+      "trump": "D", "hand": ["JH", "TD", "QH", "AC", "KC"], "options": ["JH", "TD", "QH", "AC", "KC"], "answer": "JH",
+      "seat": "first",
+      "full_hand": ["JH", "TD", "QH", "AC", "KC"],
+      "accept": {"round": 1, "orderer_seat": 3, "alone": false, "up_card": "9D"},
+      "tricks": [],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "JH"}
     },
     {
       "id": 16, "page": 17, "phase": "bid2", "buildable": true,
@@ -123,24 +164,45 @@
       "note": "Clubs: JC(right)+JS(left) = 2 bowers + 3 off diamonds. The 'alone' is score-driven (9-4, close it out); model can't see score."
     },
     {
-      "id": 17, "page": 18, "phase": "play", "buildable": false,
+      "id": 17, "page": 18, "phase": "play", "buildable": true,
       "score": [4, 3], "text": "You (dealer) picked JS (spades trump). S1 leads AD, all follow, you trump with KS. Lead next?",
-      "trump": "S", "hand": ["JS", "KS", "AH", "9H", "KC"], "options": ["JS", "AH", "9H", "KC"], "answer": "JS"
+      "trump": "S", "hand": ["JS", "KS", "AH", "9H", "KC"], "options": ["JS", "AH", "9H", "KC"], "answer": "JS",
+      "seat": "dealer",
+      "full_hand": ["KS", "AH", "9H", "KC", "9C"],
+      "accept": {"round": 1, "orderer_seat": 4, "alone": false, "up_card": "JS"},
+      "discard": "9C",
+      "tricks": [
+        {"plays": [{"seat": 1, "card": "AD"}, {"seat": 2, "card": "TD"}, {"seat": 3, "card": "QD"}, {"seat": 4, "card": "KS"}], "winner": 4}
+      ],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "JS"},
+      "note": "hand's already-played KS is included (this entry's transcription uses pre-trick full-hand semantics, unlike most other play questions which show the remaining hand -- options correctly excludes KS, confirming). full_hand is the pre-pickup 5 cards (KS,AH,9H,KC + arbitrary 9C); 9C is explicitly discarded back so the post-pickup hand ends up exactly KS,AH,9H,KC,JS, matching the quiz's given hand."
     },
     {
-      "id": 18, "page": 19, "phase": "discard", "buildable": false,
+      "id": 18, "page": 19, "phase": "discard", "buildable": true,
       "text": "Dealer turns up JC, picking up and going ALONE (clubs trump). Discard?",
-      "trump": "C", "hand": ["JS", "TC", "AS", "AD", "KD", "JC"], "options": ["JS", "TC", "AS", "AD", "KD"], "answer": "AS"
+      "trump": "C", "up_card": "JC", "orderer": "dealer", "alone": true,
+      "hand": ["JS", "TC", "AS", "AD", "KD", "JC"], "options": ["JS", "TC", "AS", "AD", "KD"], "answer": "AS",
+      "answer_action": {"type": "discard", "card": "AS"}
     },
     {
-      "id": 19, "page": 21, "phase": "discard", "buildable": false,
+      "id": 19, "page": 21, "phase": "discard", "buildable": true,
       "text": "You are dealer; partner orders up JC (clubs trump). Discard?",
-      "trump": "C", "hand": ["AH", "KH", "AD", "QD", "AS", "JC"], "options": ["AH", "KH", "AD", "QD", "AS"], "answer": "QD"
+      "trump": "C", "up_card": "JC", "orderer": "partner", "alone": false,
+      "hand": ["AH", "KH", "AD", "QD", "AS", "JC"], "options": ["AH", "KH", "AD", "QD", "AS"], "answer": "QD",
+      "answer_action": {"type": "discard", "card": "QD"}
     },
     {
-      "id": 20, "page": 22, "phase": "play", "buildable": false,
+      "id": 20, "page": 22, "phase": "play", "buildable": true,
       "text": "2nd seat; 3rd going alone in Hearts. Lead?",
-      "trump": "H", "hand": ["JS", "TC", "TD", "AS", "KC"], "options": ["JS", "TC", "TD", "AS", "KC"], "answer": "TD"
+      "trump": "H", "hand": ["JS", "TC", "TD", "AS", "KC"], "options": ["JS", "TC", "TD", "AS", "KC"], "answer": "TD",
+      "seat": "second",
+      "full_hand": ["JS", "TC", "TD", "AS", "KC"],
+      "accept": {"round": 1, "orderer_seat": 3, "alone": true, "up_card": "9H"},
+      "tricks": [],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "TD"},
+      "note": "3rd (bidding-seat 3) alone -> their partner (bidding-seat 1) sits out, shifting trick1 leadership from seat1 to seat2 (you). Round (self-order vs call) and exact up_card are unstated by the quiz; round1 self-order chosen as the simplest construction that reaches the same PLAY state -- doesn't affect the decision (see build_play_state's docstring)."
     },
     {
       "id": 21, "page": 23, "phase": "play", "buildable": false,
@@ -157,9 +219,15 @@
       "note": "Picking up JS gives right bower + 9S = 2 trump; marginal, mild score influence."
     },
     {
-      "id": 23, "page": 25, "phase": "play", "buildable": false,
+      "id": 23, "page": 25, "phase": "play", "buildable": true,
       "text": "2nd seat ordered partner (dealer) to pick up 9S (spades trump). S1 leads 9D. What do you play?",
-      "trump": "S", "hand": ["AH", "JH", "9H", "JC", "AS"], "options": ["AH", "JH", "9H", "JC", "AS"], "answer": "9H"
+      "trump": "S", "hand": ["AH", "JH", "9H", "JC", "AS"], "options": ["AH", "JH", "9H", "JC", "AS"], "answer": "9H",
+      "seat": "second",
+      "full_hand": ["AH", "JH", "9H", "JC", "AS"],
+      "accept": {"round": 1, "orderer_seat": 2, "alone": false, "up_card": "9S"},
+      "tricks": [],
+      "current_trick": [{"seat": 1, "card": "9D"}],
+      "answer_action": {"type": "play", "card": "9H"}
     },
     {
       "id": 24, "page": 26, "phase": "bid2", "buildable": true,
@@ -171,9 +239,18 @@
       "note": "Spades only K-T (no bower); weak call, likely score/position driven (9-5, partner dealer)."
     },
     {
-      "id": 25, "page": 27, "phase": "play", "buildable": false,
+      "id": 25, "page": 27, "phase": "play", "buildable": true,
       "score": [3, 3], "text": "Partner (dealer) picked KH (hearts trump). S1 leads TD, you win with Ace, S3 follows. Play next?",
-      "trump": "H", "hand": ["KS", "QC", "TS", "QH"], "options": ["KS", "QC", "TS", "QH"], "answer": "QH"
+      "trump": "H", "hand": ["KS", "QC", "TS", "QH"], "options": ["KS", "QC", "TS", "QH"], "answer": "QH",
+      "seat": "second",
+      "full_hand": ["KS", "QC", "TS", "QH", "AD"],
+      "accept": {"round": 1, "orderer_seat": 4, "alone": false, "up_card": "KH"},
+      "tricks": [
+        {"plays": [{"seat": 1, "card": "TD"}, {"seat": 2, "card": "AD"}, {"seat": 3, "card": "9D"}, {"seat": 4, "card": "QD"}], "winner": 2}
+      ],
+      "current_trick": [],
+      "answer_action": {"type": "play", "card": "QH"},
+      "note": "The winning Ace is inferred as AD (the only card that legally follows TD's diamond lead and is an Ace). Seat3/seat4's unnarrated trick1 plays are filled as non-bower diamonds (JD would be the LEFT BOWER under hearts trump, an effective trump card that would beat the Ace -- caught by the trick-winner assertion), keeping 'you win' true."
     }
   ]
 }
