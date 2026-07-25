@@ -232,9 +232,10 @@ def main():
                          "against the Python path in "
                          "tests/test_cpp_equivalence.py. Drops belief_model "
                          "reweighting (not ported) and is incompatible with "
-                         "--round2-seed-frac/--value-ground-frac (they "
-                         "depend on rollout_value, also not ported). The "
-                         "learner process (this one) always uses the "
+                         "--value-ground-frac (depends on rollout_value, "
+                         "also not ported) -- --round2-seed-frac works fine "
+                         "with --engine cpp, it never calls rollout_value. "
+                         "The learner process (this one) always uses the "
                          "Python engine regardless -- it only owns the "
                          "buffer/train_step, never self-play.")
     args = ap.parse_args()
@@ -242,9 +243,9 @@ def main():
     from rebel.train_rebel import ReBeLTrainer
     from rebel.networks import PolicyValueNet
 
-    if args.engine == "cpp" and (args.round2_seed_frac > 0 or args.value_ground_frac > 0):
-        print("error: --engine cpp is incompatible with --round2-seed-frac/"
-              "--value-ground-frac (both depend on rollout_value, which "
+    if args.engine == "cpp" and args.value_ground_frac > 0:
+        print("error: --engine cpp is incompatible with --value-ground-frac "
+              "(it depends on rollout_value, which "
               "isn't ported to C++)", flush=True)
         sys.exit(1)
     print(f"actor engine: {args.engine}", flush=True)

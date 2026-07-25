@@ -94,19 +94,105 @@ def test_net_agent_plays_legally():
 # Python path (world sampling isn't required to match, see cpp/belief.cpp's
 # docstring) -- these confirm the C++ self-play hot path actually runs
 # end-to-end and produces well-formed samples/training updates, and that the
-# documented incompatibilities (belief_model, round2_seed_frac,
-# value_ground_frac all depend on un-ported Python-only features) are
-# rejected up front rather than failing deep inside self-play. -------------
+# documented incompatibilities (belief_model, value_ground_frac -- both
+# depend on un-ported Python-only features) are rejected up front rather
+# than failing deep inside self-play. round2_seed_frac is NOT one of these:
+# _biased_deal never calls rollout_value, it only needed engine-aware
+# hand/up_card conversion (same as _cluster_key already has) -- see
+# test_cpp_engine_biased_deal_works below. -------------
 
 def test_cpp_engine_rejects_unsupported_options():
     with pytest.raises(ValueError):
         ReBeLTrainer(engine="nonsense")
     with pytest.raises(ValueError):
-        ReBeLTrainer(engine="cpp", round2_seed_frac=0.1)
-    with pytest.raises(ValueError):
         ReBeLTrainer(engine="cpp", value_ground_frac=0.1)
     with pytest.raises(ValueError):
         ReBeLTrainer(engine="cpp", belief_model=object())
+
+
+def test_cpp_engine_biased_deal_works():
+    trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=2, depth_limit=2,
+                           engine="cpp", round2_seed_frac=1.0, seed=0)
+    state = trainer._biased_deal()
+    assert state.phase == trainer._cpp.Phase.BidRound1
+
+
+def test_biased_deal_weakens_the_hands_versus_a_natural_deal():
+    """Regression test for real, measured bugs this session found in
+    _biased_deal, in order:
+
+    1. An early version rejected/redealt the WHOLE deck until seat 1 alone
+       was weak. By card conservation on a fixed 24-card deck, that doesn't
+       just weaken seat 1 -- it systematically concentrates the up-card
+       suit's strength onto seats 2-4 instead, which were never supposed to
+       be biased. Measured: round2_seed_frac made round 2 LESS reachable,
+       worse as the fraction increased (9.8% -> 9.5% -> 8.8% -> 5.5%).
+    2. A fix that swapped only seat 1's hand (leaving 2-4 untouched)
+       resolved that regression but gave a much weaker, noisier effect,
+       since only one of four seats was ever biased.
+    3. A generalization to all 4 hands (_weaken_all_hands_for_suit,
+       thresholding their SUM) was first written assuming sum <=
+       _ROUND2_BIAS_SUM_THRESHOLD (2.0) was a *provable* guarantee (since
+       hand_score is non-negative). That claim was falsified by this very
+       test: a real draw only reached sum=4.67 against the 2.0 threshold.
+       Root cause, found by measurement (not guesswork): the swap loop
+       only ever swapped against kitty[0], silently leaving 2 of the
+       kitty's 3 cards untouched (fixed -- now all kitty slots are
+       candidates), and the up-card itself (never part of any hand's
+       score) wasn't being used as a free extra sink for the single
+       highest-value same-suit card (fixed -- see
+       _weaken_all_hands_for_suit's docstring). Even with both fixes,
+       there are up to 7 suit-relevant card values and only 4 total sink
+       slots (up-card + 3 kitty), so 2.0 is still not always reachable --
+       measured achievable range is roughly mean 3.17, max ~3.9 over 500
+       natural deals with max-effort swapping (threshold=0). This is
+       therefore a best-effort minimization, not a hard guarantee, and the
+       test below checks the properties that actually hold: the swap
+       process never makes the sum worse than the natural deal, and stays
+       within the measured achievable range (with slack)."""
+    trainer = ReBeLTrainer(seed=0, round2_seed_frac=1.0)
+    for i in range(20):
+        natural = trainer._fresh_deal()
+        suit = natural.up_card.suit
+        natural_hands = [list(natural.hands[seat]) for seat in range(4)]
+        natural_sum = sum(trainer._point_count.hand_score(h, suit) for h in natural_hands)
+
+        new_hands, new_up, new_kitty = trainer._weaken_all_hands_for_suit(
+            natural_hands, suit, natural.up_card, natural.kitty,
+            trainer._ROUND2_BIAS_SUM_THRESHOLD)
+        scores = [trainer._point_count.hand_score(h, suit) for h in new_hands]
+        biased_sum = sum(scores)
+
+        assert biased_sum <= natural_sum + 1e-9, (
+            f"draw {i}: biased sum {biased_sum} exceeds the SAME deal's natural "
+            f"sum {natural_sum} -- swapping should never make things worse")
+        assert biased_sum <= 4.5, (
+            f"draw {i}: biased sum {biased_sum} far exceeds the measured "
+            f"achievable range (mean ~3.2, max ~3.9), scores={scores}")
+
+
+def test_cpp_engine_biased_deal_matches_python_achievable_range():
+    trainer = ReBeLTrainer(engine="cpp", seed=0, round2_seed_frac=1.0)
+    from euchre.cards import Card as PyCard
+    for i in range(20):
+        state = trainer._biased_deal()
+        suit = PyCard.from_id(state.up_card).suit
+        scores = []
+        for seat in range(4):
+            hand = [PyCard.from_id(c) for c in range(24) if (state.hands[seat] >> c) & 1]
+            scores.append(trainer._point_count.hand_score(hand, suit))
+        assert sum(scores) <= 4.5, (
+            f"draw {i}: sum {sum(scores)} far exceeds the measured achievable "
+            f"range (mean ~3.2, max ~3.9), scores={scores}")
+
+
+@pytest.mark.slow
+def test_cpp_engine_round2_seed_frac_self_play_runs():
+    trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=2, depth_limit=2,
+                           engine="cpp", round2_seed_frac=1.0, seed=0)
+    result = trainer.self_play_hand()
+    assert sum(result) in (0, 1, 2, 4)
+    assert len(trainer.buffer) > 0
 
 
 def test_cpp_engine_value_fn_returns_finite_scalar():

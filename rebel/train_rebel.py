@@ -154,14 +154,18 @@ class ReBeLTrainer:
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
             raise ValueError(f"engine must be 'python' or 'cpp', got {engine!r}")
-        if engine == "cpp" and (round2_seed_frac > 0 or value_ground_frac > 0):
-            # Both features go through rollout_value (rebel/pimc.py), which
-            # is deliberately Python-only (see the C++ port plan) -- rather
-            # than silently falling back to slow Python for just these
-            # calls, require the caller to pick one explicitly.
+        if engine == "cpp" and value_ground_frac > 0:
+            # _grounded_value_sample calls rollout_value (rebel/pimc.py),
+            # which is deliberately Python-only (see the C++ port plan) --
+            # rather than silently falling back to slow Python for just
+            # this call, require the caller to pick one explicitly.
+            # round2_seed_frac does NOT have this restriction (see
+            # _biased_deal): it never calls rollout_value at all, it only
+            # needed engine-aware hand/up_card conversion, same as
+            # _cluster_key already has.
             raise ValueError(
-                "round2_seed_frac/value_ground_frac require engine='python' "
-                "(they depend on rollout_value, which isn't ported to C++)")
+                "value_ground_frac requires engine='python' "
+                "(it depends on rollout_value, which isn't ported to C++)")
         if engine == "cpp" and belief_model is not None:
             # cpp.SubgameSolver's production constructor only supports
             # uniform sample_determinization, not belief_model reweighting
@@ -379,32 +383,124 @@ class ReBeLTrainer:
             stick_the_dealer=self.stick_the_dealer,
             team0_score=team0_score, team1_score=team1_score).deal(self.rng)
 
-    # ORDER_1_THRESH (2.2) is where PointCountAgent itself calls -- 86% of
-    # random first-actor hands already score under it (measured), so
-    # filtering there barely biases anything and sits right at the
-    # ambiguous boundary where a reasonably-calibrated bid1 policy has real
-    # reason to mix rather than confidently pass. This needs hands that are
-    # unambiguously weak, not merely "under the calling line" -- close to
-    # the scoring floor (5 off-suit junk cards score 0.15, the minimum
-    # possible), not the decision boundary.
-    _ROUND2_BIAS_MAX_SCORE = 0.3  # ~4.8% of hands qualify (measured)
+    # Best-effort target, not a provable guarantee -- see
+    # _weaken_all_hands_for_suit's docstring for the measured achievable
+    # range. ORDER_1_THRESH (2.2) is where PointCountAgent itself calls.
+    _ROUND2_BIAS_SUM_THRESHOLD = 2.0
 
-    def _biased_deal(self, max_tries: int = 200) -> EuchreState:
-        """Deal, rejecting and redealing until the *first-to-act* hand is
-        unambiguously weak for the up-card's suit -- raises the odds round 1
-        genuinely resolves toward round 2, without touching how round 1
-        itself gets decided or recorded, and without needing all four hands
-        to qualify (only checking the first actor is both simpler and a much
-        higher acceptance rate). Falls back to a normal deal if no
-        qualifying deal turns up within the try budget."""
-        for _ in range(max_tries):
-            state = self._fresh_deal()
-            suit = state.up_card.suit
-            first = state.current_player
-            if (self._point_count.hand_score(state.hands[first], suit)
-                    <= self._ROUND2_BIAS_MAX_SCORE):
-                return state
-        return self._fresh_deal()
+    def _weaken_all_hands_for_suit(self, hands, suit, up_card, kitty, threshold,
+                                    max_swaps=3):
+        """Greedily swap the single most suit-relevant card, across ANY of
+        the 4 hands, with ANY kitty card -- whichever one swap drops the
+        SUM of all 4 hands' hand_score(suit) the most -- until the sum is
+        at/under `threshold` or `max_swaps` (bounded by the kitty's 3
+        cards) is used up. Returns (new_hands, new_up_card, new_kitty);
+        does not mutate the inputs.
+
+        Two fixes over the first version of this (which only ever swapped
+        against kitty[0], silently leaving 2 of the kitty's 3 cards
+        untouched, and never considered the up-card):
+
+        1. Every kitty slot is now a swap candidate, not just kitty[0] --
+           measured this alone raises the achievable post-swap mean from
+           ~4.6 to a meaningfully lower number by actually using the
+           kitty's full 3-card capacity.
+        2. Before touching any hand, the up-card itself is upgraded to the
+           single highest-value same-suit card available in {current
+           up-card} union kitty (never a hand card, and never a
+           different-suit card -- both would change what `suit` means for
+           round-2 purposes). This is a strictly free improvement: the
+           up-card was never part of any hand's score, so pulling the
+           biggest same-suit card out of circulation into that slot
+           removes it from the pool that swaps have to fight over, at zero
+           disruption cost.
+
+        Despite both fixes, **this is not a provable guarantee** the way
+        the single-seat, per-hand version was. There are up to 7 suit-
+        relevant card values (right bower, left bower, ace, king, queen,
+        ten, nine) and only 4 "sink" slots total (up-card + 3 kitty) to
+        absorb them out of the 4 hands -- when 5+ of those 7 values are in
+        play (i.e. not already the up-card) there are more relevant cards
+        than sink capacity, so some irreducible amount must remain in
+        hands no matter how the swaps are chosen. `threshold` is a
+        best-effort minimization target: swapping always terminates and
+        never makes the sum worse, but does not always reach `threshold`.
+
+        Kept as a deterministic swap construction (not reject-and-redeal)
+        for the same reason as before: a joint 4-hand condition would be a
+        much rarer event to hit by chance, so rejection sampling risks
+        needing a huge number of retries; swapping is O(swaps) and always
+        terminates."""
+        hands = [list(h) for h in hands]
+        kitty = list(kitty)
+
+        def relevance(card):
+            return self._point_count.hand_score([card], suit)
+
+        for i, c in enumerate(kitty):
+            if c.suit == up_card.suit and relevance(c) > relevance(up_card):
+                kitty[i], up_card = up_card, c
+
+        def total():
+            return sum(self._point_count.hand_score(h, suit) for h in hands)
+
+        for _ in range(max_swaps):
+            base_total = total()
+            if base_total <= threshold or not kitty:
+                break
+            best = None  # (seat, card_index, kitty_index, resulting_total)
+            for seat in range(4):
+                h = hands[seat]
+                base_h = self._point_count.hand_score(h, suit)
+                for i in range(len(h)):
+                    for k in range(len(kitty)):
+                        trial = h[:i] + [kitty[k]] + h[i + 1:]
+                        new_total = base_total - base_h + self._point_count.hand_score(trial, suit)
+                        if best is None or new_total < best[3]:
+                            best = (seat, i, k, new_total)
+            if best is None or best[3] >= base_total:
+                break  # no remaining swap helps further
+            seat, i, k, _ = best
+            hands[seat][i], kitty[k] = kitty[k], hands[seat][i]
+        return hands, up_card, kitty
+
+    def _biased_deal(self):
+        """Deal, then directly construct all 4 hands to be collectively weak
+        for the up-card's suit -- raises the odds round 1 genuinely
+        resolves toward round 2, without touching how round 1 itself gets
+        decided or recorded. See _weaken_all_hands_for_suit for why this
+        weakens every seat together rather than just the first actor, and
+        for why it's a best-effort target rather than a hard guarantee.
+
+        Engine-aware the same way _cluster_key is: doesn't call
+        rollout_value or anything else Python-only, just needed the cpp
+        state's bitmask hands / int up_card converted to the Card objects
+        PointCountAgent.hand_score expects, and the swapped hands/up_card/
+        kitty converted back for deal_from."""
+        state = self._fresh_deal()
+        if self.engine == "cpp":
+            from euchre.cards import Card as PyCard
+            up_card = PyCard.from_id(state.up_card)
+            suit = up_card.suit
+            hands = [[PyCard.from_id(c) for c in range(24) if (state.hands[seat] >> c) & 1]
+                    for seat in range(4)]
+            kitty = [PyCard.from_id(c) for c in state.kitty]
+            new_hands, new_up, new_kitty = self._weaken_all_hands_for_suit(
+                hands, suit, up_card, kitty, self._ROUND2_BIAS_SUM_THRESHOLD)
+            hands_bm = [sum(1 << c.id for c in h) for h in new_hands]
+            return self._cpp.EuchreState.new_hand(
+                dealer=state.dealer, stick_the_dealer=self.stick_the_dealer,
+                team0_score=state.team0_score, team1_score=state.team1_score
+            ).deal_from(hands_bm, new_up.id, [c.id for c in new_kitty])
+
+        suit = state.up_card.suit
+        hands = [list(state.hands[seat]) for seat in range(4)]
+        new_hands, new_up, new_kitty = self._weaken_all_hands_for_suit(
+            hands, suit, state.up_card, state.kitty, self._ROUND2_BIAS_SUM_THRESHOLD)
+        return EuchreState.new_hand(
+            dealer=state.dealer, stick_the_dealer=self.stick_the_dealer,
+            team0_score=state.team0_score, team1_score=state.team1_score
+        ).deal_from(new_hands, new_up, new_kitty)
 
     # Matches recalibrate_value.py's default -- round 2 is the specific spot
     # this session's diagnosis traced the bias to, so it stays deliberately

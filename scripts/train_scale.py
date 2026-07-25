@@ -79,15 +79,15 @@ def main() -> None:
                          "differentially verified bit-for-bit against the "
                          "Python path in tests/test_cpp_equivalence.py. "
                          "Drops belief_model reweighting (not ported) and "
-                         "is incompatible with --round2-seed-frac/"
-                         "--value-ground-frac (both depend on "
-                         "rollout_value, also not ported).")
+                         "is incompatible with --value-ground-frac (depends "
+                         "on rollout_value, also not ported) -- "
+                         "--round2-seed-frac works fine with --engine cpp, "
+                         "it never calls rollout_value.")
     args = ap.parse_args()
 
-    if args.engine == "cpp" and (args.round2_seed_frac > 0 or args.value_ground_frac > 0):
-        print("error: --engine cpp is incompatible with --round2-seed-frac/"
-              "--value-ground-frac (both depend on rollout_value, which "
-              "isn't ported to C++)")
+    if args.engine == "cpp" and args.value_ground_frac > 0:
+        print("error: --engine cpp is incompatible with --value-ground-frac "
+              "(it depends on rollout_value, which isn't ported to C++)")
         sys.exit(1)
     print(f"self-play engine: {args.engine}")
 
