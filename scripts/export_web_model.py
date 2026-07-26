@@ -8,13 +8,22 @@ old (now-replaced) net, one entry per named submodule
 value_head), each covering that submodule's params in a fixed order
 (trunk.0.{weight,bias}, trunk.2.{weight,bias}, head.{weight,bias} for the
 MLP submodules; weight, bias for the bare pass_head Linear). The JS side
-(PolicyValueNetJS in application/euchre_vs_agents.html) must consume the
-same order -- see that file's comments.
+(PolicyValueNetJS in application/Euchre vs Agents/js/nn_core.js) must
+consume the same order -- see that file's comments.
 
-    python scripts/export_web_model.py --checkpoint checkpoints/rebel_sa.pt \
-        --out application/model_weights.json
+Writes a .js file (`const WEIGHTS_V2 = {...};`), not .json -- the app's
+euchre_vs_agents.html loads it via a plain
+<script src="js/model_weights.js"> tag (js/euchre_game.js's initNets()
+reads the resulting global), which works with the page opened directly as
+a file:// URL. A fetch()'d .json would not: browsers block that under
+file://, and requiring a local server just to view the app would defeat
+the point of it being a self-contained folder.
 
-Then splice the result into the app with apply_web_model.py.
+To update the app to a newer checkpoint: run this (defaults already point
+at the app's own file), then just reload the page -- no other step, no
+splicing into the HTML.
+
+    python scripts/export_web_model.py
 """
 
 import argparse
@@ -66,12 +75,15 @@ def export(checkpoint_path: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=str, default="checkpoints/rebel_sa.pt")
-    ap.add_argument("--out", type=str, default="application/model_weights.json")
+    ap.add_argument("--out", type=str,
+                    default="application/Euchre vs Agents/js/model_weights.js")
     args = ap.parse_args()
 
     modules = export(args.checkpoint)
     with open(args.out, "w") as f:
-        json.dump(modules, f)
+        f.write("const WEIGHTS_V2 = ")
+        json.dump(modules, f, separators=(",", ":"))
+        f.write(";\n")
     total_bytes = sum(len(d) for m in modules.values() for d in m["data"])
     print(f"Exported {args.checkpoint} -> {args.out} "
           f"({total_bytes} base64 chars across {len(modules)} modules)")

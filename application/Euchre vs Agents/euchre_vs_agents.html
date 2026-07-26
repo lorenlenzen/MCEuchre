@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Euchre — vs. Three Agents</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div class="title">Euchre — vs. Three Agents</div>
+    <div class="score-panel">
+      <span id="score-label-a">You+North</span>
+      <input type="number" id="score-a" min="0" max="10" value="0" readonly>
+      <span class="vs">–</span>
+      <input type="number" id="score-b" min="0" max="10" value="0" readonly>
+      <span id="score-label-b">West+East</span>
+    </div>
+  </div>
+  <div class="main-layout">
+    <div class="table-col">
+      <div class="table-wrap" id="table-wrap">
+        <div class="seat-row-top">
+          <div class="seat-block" id="seat-2">
+            <div class="seat-header">
+              <span class="seat-name" id="label-2">North</span>
+              <span class="tricks-badge" id="tricks-2">0</span>
+              <span class="badge-btn" id="dealer-2">dealer</span>
+            </div>
+            <div class="hand-row" id="hand-2"></div>
+            <div class="played-slot" id="played-2"></div>
+          </div>
+        </div>
+        <div class="seat-row-mid">
+          <div class="seat-block" id="seat-1">
+            <div class="seat-header">
+              <span class="badge-btn" id="dealer-1">dealer</span>
+              <span class="tricks-badge" id="tricks-1">0</span>
+              <span class="seat-name" id="label-1">West</span>
+            </div>
+            <div class="side-row">
+              <div class="hand-row vert" id="hand-1"></div>
+              <div class="played-slot vert" id="played-1"></div>
+            </div>
+          </div>
+          <div class="center-area" id="center-area"></div>
+          <div class="seat-block" id="seat-3">
+            <div class="seat-header">
+              <span class="seat-name" id="label-3">East</span>
+              <span class="tricks-badge" id="tricks-3">0</span>
+              <span class="badge-btn" id="dealer-3">dealer</span>
+            </div>
+            <div class="side-row">
+              <div class="played-slot vert" id="played-3"></div>
+              <div class="hand-row vert" id="hand-3"></div>
+            </div>
+          </div>
+        </div>
+        <div class="seat-row-bottom">
+          <div class="seat-block" id="seat-0">
+            <div class="played-slot" id="played-0"></div>
+            <div class="hand-row" id="hand-0"></div>
+            <div class="seat-header">
+              <span class="seat-name" id="label-0">You</span>
+              <span class="tricks-badge" id="tricks-0">0</span>
+              <span class="badge-btn" id="dealer-0">dealer</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="actionbar" id="actionbar"></div>
+      <div id="banner-slot"></div>
+    </div>
+    <div class="deck-col">
+      <div class="deck-panel" id="history-panel">
+        <h3 id="history-title">Hand History</h3>
+        <div id="playback-controls" style="display:none;">
+          <div class="actionbar" style="padding:0 0 8px;">
+            <button class="btn secondary" id="pb-back">◀ Back</button>
+            <button class="btn secondary" id="pb-fwd">Forward ▶</button>
+            <button class="btn secondary" id="pb-live">Live Game</button>
+          </div>
+          <div class="setup-note" id="pb-status"></div>
+          <div id="flag-area"></div>
+        </div>
+        <div class="actionbar" style="padding:4px 0 8px;">
+          <button class="btn secondary" id="copy-corrections-btn">📋 Copy Corrections (0)</button>
+        </div>
+        <div id="history-list"></div>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+<script src="js/euchre_core.js"></script>
+<script src="js/nn_core.js"></script>
+<script src="js/model_weights.js"></script>
+<script src="js/euchre_game.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

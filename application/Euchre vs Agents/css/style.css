@@ -1,0 +1,250 @@
+  :root {
+    --felt-1: #0d3b2e; --felt-2: #124a39; --felt-edge: #0a2a20;
+    --rail: #5c3a21; --rail-hi: #7a4f2c;
+    --brass: #c9a464; --brass-hi: #e6c98a;
+    --cream: #faf6ec; --ink: #241c14;
+    --red: #a3273c; --black: #201a14;
+    --muted: #cfead9; --agent: #6fb8e0; --agent-hi: #a9d8f2;
+  }
+  * { box-sizing: border-box; }
+  html {
+    height: 100%; overflow-y: auto; overflow-x: hidden;
+  }
+  body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--felt-edge);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    color: var(--cream);
+  }
+  /* height (not min-height): the whole app is meant to fit one viewport-tall
+     screen without page scrolling on typical sizes -- .main-layout/.table-col/
+     .deck-col below all propagate min-height:0 so their flex children can
+     actually shrink to fit rather than pushing #app taller than 100vh (the
+     one flexbox gotcha that would otherwise silently defeat this). The
+     overflow-y:auto on html/body above is only a safety net for viewports
+     too small/narrow to fit even the shrunk layout (e.g. .main-layout
+     wrapping to stacked columns) -- it should not engage on a normal screen. */
+  #app { width: 100%; height: 100vh; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 14px 22px 6px; font-family: "Palatino Linotype", Palatino, Georgia, serif;
+    flex-wrap: wrap; gap: 10px;
+  }
+  .title { font-size: 20px; letter-spacing: 0.03em; color: var(--brass-hi); font-variant: small-caps; }
+  .score-panel { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .score-panel input {
+    width: 46px; text-align: center; font-size: 15px; font-family: Georgia, serif;
+    background: rgba(255,255,255,0.08); color: var(--cream); border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 6px; padding: 3px 2px;
+  }
+  .score-panel .vs { opacity: 0.6; }
+
+  .main-layout { display: flex; flex: 1; gap: 14px; padding: 6px 16px 16px; align-items: stretch; flex-wrap: wrap; min-height: 0; }
+  .table-col { flex: 2; min-width: 480px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .deck-col {
+    flex: 1; min-width: 300px; height: 100%; display: flex; flex-direction: column; min-height: 0;
+    overflow-y: auto;
+  }
+
+  .table-wrap {
+    position: relative;
+    border-radius: 40px; border: 8px solid var(--rail);
+    box-shadow: inset 0 0 0 3px var(--rail-hi), inset 0 8px 30px rgba(0,0,0,0.5);
+    background: radial-gradient(ellipse 120% 90% at 50% 50%, var(--felt-2) 0%, var(--felt-1) 62%, var(--felt-edge) 100%);
+    padding: 14px; min-height: 720px; flex: 1;
+    display: grid; grid-template-rows: auto 1fr auto; gap: 6px;
+  }
+
+  .seat-block { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .seat-row-top, .seat-row-bottom { display: flex; justify-content: space-around; }
+  .seat-row-mid { display: flex; justify-content: space-between; align-items: center; }
+
+  .seat-header { display: flex; align-items: center; gap: 6px; }
+  .seat-name { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .seat-name.turn { color: var(--felt-edge); background: var(--brass-hi); padding: 2px 9px; border-radius: 9px; font-weight: bold; box-shadow: 0 0 10px var(--brass); }
+
+  .seat-block.active-turn {
+    position: relative;
+    border-radius: 16px;
+    box-shadow: 0 0 0 3px var(--brass-hi), 0 0 22px 4px var(--brass);
+    animation: turn-pulse 1.4s ease-in-out infinite;
+    padding: 3px;
+  }
+  /* Positioned out of normal flow (floating just above the block) so the
+     banner never adds to the seat-block's layout height -- it used to be an
+     in-flow block, which grew the .table-wrap grid's auto-sized rows past
+     what the viewport-fit layout allots them (see .main-layout/.table-col),
+     pushing the whole page past 100vh whenever it's this seat's turn. */
+  .seat-block.active-turn::before {
+    content: "▶ turn";
+    position: absolute;
+    top: -9px; left: 50%; transform: translateX(-50%);
+    z-index: 2;
+    white-space: nowrap;
+    text-align: center;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--felt-edge);
+    background: var(--brass-hi);
+    border-radius: 6px;
+    padding: 1px 8px;
+    font-weight: bold;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+  @keyframes turn-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--brass-hi), 0 0 16px 2px var(--brass); }
+    50% { box-shadow: 0 0 0 3px var(--brass-hi), 0 0 28px 8px var(--brass); }
+  }
+
+  .badge-btn {
+    font-size: 10px; padding: 2px 7px; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.06); color: var(--muted); letter-spacing: 0.03em; user-select: none;
+  }
+  .badge-btn.agent-on { background: linear-gradient(180deg, var(--agent-hi), var(--agent)); color: #072033; border-color: transparent; font-weight: bold; }
+  .badge-btn.dealer-on { background: linear-gradient(180deg, var(--brass-hi), var(--brass)); color: var(--felt-edge); border-color: transparent; font-weight: bold; }
+
+  .tricks-badge {
+    font-size: 14px; font-weight: bold; width: 22px; height: 22px; line-height: 22px;
+    text-align: center; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.08); color: var(--cream);
+  }
+
+  .hand-row { display: flex; gap: 4px; min-height: 66px; }
+  .hand-row.vert { flex-direction: column; min-height: unset; }
+
+  .card {
+    width: 40px; height: 58px; border-radius: 6px; background: var(--cream);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5); position: relative;
+    font-weight: bold; border: 2px solid transparent; user-select: none;
+  }
+  .card .rank { position: absolute; top: 3px; left: 4px; font-size: 11px; line-height: 1; }
+  .card .suit {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 22px; line-height: 1;
+  }
+  .card.red { color: var(--red); } .card.black { color: var(--black); }
+  .card.empty { background: rgba(255,255,255,0.06); border: 2px dashed rgba(255,255,255,0.25); }
+  .card.clickable { cursor: pointer; transition: transform 0.1s ease; }
+  .card.clickable:hover { transform: translateY(-6px); }
+  .card.illegal { filter: grayscale(0.75) brightness(0.6); cursor: not-allowed; }
+  .card.illegal:hover { transform: none; }
+  .card.active-slot { border-color: var(--agent-hi); box-shadow: 0 0 10px var(--agent); }
+
+  .center-area { display: flex; flex-direction: column; align-items: center; gap: 8px; justify-content: center; }
+  .trump-badge {
+    display: flex; align-items: center; gap: 6px; background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+    color: var(--felt-edge); font-weight: bold; font-size: 12px; padding: 4px 12px; border-radius: 16px;
+  }
+  .trick-grid { position: relative; width: 170px; height: 130px; }
+  .trick-slot { position: absolute; }
+  .trick-slot.n { top: 0; left: 50%; transform: translateX(-50%); }
+  .trick-slot.s { bottom: 0; left: 50%; transform: translateX(-50%); }
+  .trick-slot.w { left: 0; top: 50%; transform: translateY(-50%); }
+  .trick-slot.e { right: 0; top: 50%; transform: translateY(-50%); }
+  .card.small { width: 34px; height: 48px; }
+  .card.small .rank { font-size: 9px; top: 3px; left: 3px; }
+  .card.small .suit { font-size: 19px; }
+
+  .upcard-block { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .upcard-caption { font-size: 11px; color: var(--muted); }
+
+  .deck-panel {
+    background: rgba(6,20,15,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+    padding: 12px; font-size: 12px;
+  }
+  .deck-panel h3 { margin: 0 0 8px; font-size: 13px; color: var(--brass-hi); font-weight: normal; letter-spacing: 0.03em; }
+  .deck-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+  .deck-card {
+    width: 100%; height: 44px; border-radius: 5px; background: var(--cream);
+    display: flex; align-items: center; justify-content: center; gap: 3px; font-weight: bold; font-size: 12px;
+    cursor: pointer; border: 1px solid rgba(0,0,0,0.15);
+  }
+  .deck-card.used { opacity: 0.18; cursor: not-allowed; filter: grayscale(1); }
+  .deck-card.red { color: var(--red); } .deck-card.black { color: var(--black); }
+  .deck-hint { margin-top: 8px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+
+  .log {
+    margin-top: 12px; max-height: 220px; overflow-y: auto; font-size: 12px; color: var(--muted);
+    background: rgba(6,20,15,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+    padding: 8px 10px; line-height: 1.55;
+  }
+  .log div.entry.agent { color: var(--agent-hi); }
+  .log div.entry.you { color: var(--brass-hi); }
+
+  .actionbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 8px 0 2px; }
+  .btn {
+    font-family: "Palatino Linotype", Palatino, Georgia, serif;
+    background: linear-gradient(180deg, var(--brass-hi), var(--brass)); color: var(--felt-edge);
+    border: none; border-radius: 8px; padding: 8px 15px; font-size: 13px; font-weight: bold; cursor: pointer;
+  }
+  .btn.secondary { background: rgba(255,255,255,0.08); color: var(--cream); border: 1px solid rgba(255,255,255,0.25); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .suit-row { display: flex; gap: 6px; }
+  .suit-chip {
+    width: 34px; height: 34px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    font-size: 17px; font-weight: bold; cursor: pointer; background: var(--cream); border: 2px solid transparent;
+  }
+  .suit-chip.selected { border-color: var(--agent-hi); }
+  .suit-chip.red { color: var(--red); } .suit-chip.black { color: var(--black); }
+
+  .banner {
+    margin: 10px auto; max-width: 360px; background: rgba(10,30,22,0.96); border: 1px solid var(--brass);
+    border-radius: 12px; padding: 16px 22px; text-align: center;
+  }
+  .banner h2 { margin: 0 0 6px; color: var(--brass-hi); font-size: 17px; }
+  .banner p { margin: 3px 0; color: var(--muted); font-size: 13px; }
+
+  .card.back {
+    background: repeating-linear-gradient(135deg, #1c4a63, #1c4a63 6px, #245975 6px, #245975 12px);
+    border: 2px solid var(--brass);
+  }
+  .card.deck-target {
+    background: rgba(255,255,255,0.06); border: 2px dashed var(--agent-hi); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--muted); text-align: center;
+  }
+  .side-row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .played-slot { min-height: 68px; display: flex; align-items: center; justify-content: center; }
+  .played-slot.vert { min-height: unset; margin: 0; }
+  .played-slot .card { opacity: 0.97; box-shadow: 0 0 0 2px var(--agent-hi), 0 3px 8px rgba(0,0,0,0.5); }
+  .played-slot-empty { width: 40px; height: 58px; border-radius: 6px; border: 1px dashed rgba(255,255,255,0.15); }
+  .setup-note { text-align: center; color: var(--muted); font-size: 12.5px; padding: 4px 0; }
+
+  .score-panel input[readonly] { opacity: 0.85; }
+
+  #history-list { max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+  .hist-item {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 12px; color: var(--muted);
+    transition: background 0.1s ease;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  }
+  .hist-item-copy {
+    font-size: 10px; padding: 2px 6px; border-radius: 6px; cursor: pointer;
+    background: rgba(255,255,255,0.08); color: var(--muted); border: 1px solid rgba(255,255,255,0.15);
+    flex-shrink: 0;
+  }
+  .hist-item-copy:hover { background: rgba(255,255,255,0.18); }
+  .hist-item:hover { background: rgba(255,255,255,0.1); }
+  .hist-item.selected { border-color: var(--agent-hi); background: rgba(169,216,242,0.12); color: var(--cream); }
+  .hist-item .hist-num { color: var(--brass-hi); font-weight: bold; margin-right: 4px; }
+  .hist-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 10px 0; opacity: 0.7; }
+
+  .copy-toast {
+    font-size: 11.5px; color: var(--agent-hi); text-align: center; padding: 3px 0 0;
+  }
+  .copy-fallback-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+  }
+  .copy-fallback-box {
+    background: rgba(10,30,22,0.98); border: 1px solid var(--brass); border-radius: 12px;
+    padding: 16px; width: min(560px, 90vw);
+  }
+  .copy-fallback-box textarea {
+    width: 100%; height: 220px; font-family: monospace; font-size: 11px;
+    background: rgba(255,255,255,0.06); color: var(--cream); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px; padding: 8px; box-sizing: border-box;
+  }
+  .copy-fallback-box p { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+
