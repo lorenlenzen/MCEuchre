@@ -156,7 +156,7 @@
     },
     {
       "id": 16, "page": 17, "phase": "bid2", "buildable": true,
-      "score": [9, 4], "seat": "first", "turned_down": "S", "turned_down_card": "KS", "stick": false,
+      "score": [4, 9], "seat": "first", "turned_down": "S", "turned_down_card": "KS", "stick": false,
       "hand": ["JS", "JC", "AD", "KD", "QD"],
       "options": ["Bid C (Next)", "Play C Alone", "Pass"],
       "answer": "Play C Alone", "answer_action": {"type": "call", "suit": "C", "alone": true},
