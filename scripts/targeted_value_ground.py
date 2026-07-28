@@ -45,10 +45,17 @@ from rebel.networks import PolicyValueNet
 from rebel.train_rebel import ReBeLTrainer
 
 
-def generate_samples(trainer: ReBeLTrainer, n: int, round2_frac: float):
+def generate_samples(trainer: ReBeLTrainer, n: int, round2_frac: float,
+                     alone_frac: float = 0.5):
     """n grounded Sample objects (skipping the rare None from a round-2 walk
-    that doesn't land on a callable state -- see _grounded_value_sample)."""
+    that doesn't land on a callable state -- see _grounded_value_sample).
+    alone_frac matters here specifically: grounding used to be hardcoded to
+    alone=False, so it only ever corrected not-alone's overvaluation, never
+    alone's -- which, once landed, made alone look relatively better than
+    before purely because its sibling moved and it didn't (this is what this
+    script was built to chase down in the first place)."""
     trainer._VALUE_GROUND_ROUND2_FRAC = round2_frac
+    trainer._VALUE_GROUND_ALONE_FRAC = alone_frac
     out = []
     tries = 0
     max_tries = n * 20
@@ -100,6 +107,13 @@ def main():
                          "ReBeLTrainer._VALUE_GROUND_ROUND2_FRAC's default "
                          "over-representation of round 2 relative to its "
                          "natural ~1% self-play frequency.")
+    ap.add_argument("--alone-frac", type=float, default=0.5,
+                    help="fraction of generated samples that call/order up "
+                         "alone, sampled independently of --round2-frac. "
+                         "Used to be hardcoded to not-alone only, which left "
+                         "alone's own value estimate uncorrected while "
+                         "not-alone's got fixed -- see "
+                         "ReBeLTrainer._grounded_value_sample's docstring.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3,
                     help="stop if val MSE hasn't improved for this many epochs")
@@ -144,8 +158,9 @@ def main():
                            seed=args.seed)
 
     print(f"generating {args.samples} grounded samples "
-          f"(engine={args.engine}, round2_frac={args.round2_frac})...", flush=True)
-    samples = generate_samples(trainer, args.samples, args.round2_frac)
+          f"(engine={args.engine}, round2_frac={args.round2_frac}, "
+          f"alone_frac={args.alone_frac})...", flush=True)
+    samples = generate_samples(trainer, args.samples, args.round2_frac, args.alone_frac)
 
     print("\nweakest clusters BEFORE training (current value head vs. exact "
           "double-dummy ground truth):", flush=True)

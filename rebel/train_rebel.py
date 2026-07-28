@@ -556,6 +556,17 @@ class ReBeLTrainer:
     # over-represented relative to its natural (~1%) frequency here too.
     _VALUE_GROUND_ROUND2_FRAC = 0.3
 
+    # Was hardcoded to always alone=False until diagnosed this session: with
+    # not-alone grounded but alone never touched, correcting not-alone's
+    # overvaluation left alone's own (equally unverified, plausibly just as
+    # inflated) estimate untouched -- so after grounding, alone looked
+    # *relatively* better than before purely because its sibling got pulled
+    # down and it didn't, not because alone actually improved. 0.5 (not
+    # matched to alone's real, much rarer frequency) is deliberate: the goal
+    # here is calibration parity between the two options being compared, not
+    # mimicking how often either occurs in real play.
+    _VALUE_GROUND_ALONE_FRAC = 0.5
+
     def _grounded_value_sample(self) -> Optional[Sample]:
         """One exact rollout_value-grounded sample, built the same way
         recalibrate_value.py's build_samples() does -- a real deal, a real
@@ -566,6 +577,15 @@ class ReBeLTrainer:
         case a round-2 walk doesn't land on a callable state -- callers
         should just skip storing anything that turn rather than retry, to
         avoid a hidden retry loop on a state space we already know is thin.
+
+        Samples alone vs not-alone independently of round 1 vs round 2 (see
+        _VALUE_GROUND_ALONE_FRAC) -- both used to be hardcoded to alone=False,
+        so grounding only ever corrected the not-alone leaf's calibration.
+        Once that correction landed, alone's own (never-checked, plausibly
+        equally inflated) value looked *relatively* better than before purely
+        because its sibling got pulled down and it didn't -- diagnosed this
+        session from exactly that sequence (over-calling fixed, then alone
+        calls started dominating).
 
         The captured leaf is always a *post-discard* state (trump fixed,
         zero cards played) -- for round 2's Call that's automatic (it skips
@@ -601,8 +621,9 @@ class ReBeLTrainer:
                     state = state.apply(cpp.Action.pass_())
                 if state.phase != cpp.Phase.BidRound2:
                     return None
+                want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
                 calls = [a for a in state.legal_actions()
-                        if a.kind == cpp.ActionKind.Call and not a.alone]
+                        if a.kind == cpp.ActionKind.Call and a.alone == want_alone]
                 if not calls:
                     return None
                 pre_key = self._cluster_key(state, state.current_player)
@@ -613,7 +634,8 @@ class ReBeLTrainer:
                 nxt = state.apply(self.rng.choice(calls))
             else:
                 pre_key = self._cluster_key(state, state.current_player)
-                dd_state = state.apply(cpp.Action.order_up(False))
+                want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
+                dd_state = state.apply(cpp.Action.order_up(want_alone))
                 # OrderUp (round 1) DOES go through DealerDiscard first --
                 # resolve it (best discard for the dealer's team) so nxt
                 # ends up at the same post-discard, fresh-Play-entry leaf
@@ -643,8 +665,9 @@ class ReBeLTrainer:
                 state = state.apply(Pass())
             if state.phase != Phase.BID_ROUND_2:
                 return None
+            want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
             calls = [a for a in state.legal_actions()
-                     if isinstance(a, Call) and not a.alone]
+                     if isinstance(a, Call) and a.alone == want_alone]
             if not calls:
                 return None
             pre_key = self._cluster_key(state, state.current_player)
@@ -654,7 +677,8 @@ class ReBeLTrainer:
             nxt = state.apply(self.rng.choice(calls))
         else:
             pre_key = self._cluster_key(state, state.current_player)
-            dd_state = state.apply(OrderUp(alone=False))
+            want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
+            dd_state = state.apply(OrderUp(alone=want_alone))
             # OrderUp (round 1) DOES go through DEALER_DISCARD first --
             # resolve it (best discard for the dealer's team) so nxt ends up
             # at the same post-discard, fresh-PLAY-entry leaf type

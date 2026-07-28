@@ -38,7 +38,7 @@ from rebel.pimc import resolve_dealer_discard, rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
-def build_samples(n, round2_frac, seed, equity_model=None):
+def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5):
     """(obs, value_target) pairs for post-call states -- exactly the kind of
     leaf `batch_value_fn_from_net` gets asked to score during CFR search
     (SubgameSolver's bidding-rooted solves now cut exactly at the phase
@@ -47,7 +47,17 @@ def build_samples(n, round2_frac, seed, equity_model=None):
     win-probability deltas at a realistic sampled score (unit-consistent
     with a match-equity-aware live training run); unset (default): raw
     point differential at a fixed 0-0 score, exactly this function's
-    original behavior."""
+    original behavior.
+
+    `alone_frac` samples alone vs not-alone independently of round2_frac --
+    this used to be hardcoded to alone=False, so grounding only ever
+    corrected the not-alone leaf's calibration and left alone's own
+    (never-checked) value exactly as inflated as before, which after a
+    not-alone-only correction landed made alone look *relatively* better
+    than it did pre-correction, purely from one side moving and not the
+    other. Default 0.5, not alone's real (much rarer) frequency -- the goal
+    is calibration parity between the two options being compared, not
+    matching how often either occurs in real play."""
     helper = ReBeLTrainer(seed=seed, equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
@@ -62,8 +72,9 @@ def build_samples(n, round2_frac, seed, equity_model=None):
                 state = state.apply(Pass())
             if state.phase != Phase.BID_ROUND_2:
                 continue  # defensive; should be unreachable
+            want_alone = rng.random() < alone_frac
             calls = [a for a in state.legal_actions()
-                    if isinstance(a, Call) and not a.alone]
+                    if isinstance(a, Call) and a.alone == want_alone]
             if not calls:
                 continue  # defensive; should be unreachable
             # Call (round 2) skips DEALER_DISCARD entirely -- goes straight
@@ -71,7 +82,8 @@ def build_samples(n, round2_frac, seed, equity_model=None):
             # nxt is already the right kind of leaf, no further resolution.
             nxt = state.apply(rng.choice(calls))
         else:
-            dd_state = state.apply(OrderUp(alone=False))
+            want_alone = rng.random() < alone_frac
+            dd_state = state.apply(OrderUp(alone=want_alone))
             # OrderUp (round 1) DOES go through DEALER_DISCARD first --
             # resolve it (best discard for the dealer's team) so nxt ends up
             # at the same post-discard, fresh-PLAY-entry leaf type the
@@ -107,6 +119,11 @@ def main():
     ap.add_argument("--samples", type=int, default=2000)
     ap.add_argument("--val-frac", type=float, default=0.2)
     ap.add_argument("--round2-frac", type=float, default=0.3)
+    ap.add_argument("--alone-frac", type=float, default=0.5,
+                    help="fraction of grounded samples that call/order up "
+                         "alone, sampled independently of --round2-frac -- "
+                         "see build_samples()'s docstring for why this "
+                         "can't stay hardcoded to not-alone.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3,
                     help="stop if val MSE hasn't improved for this many epochs")
@@ -144,9 +161,10 @@ def main():
     print(f"resumed from {args.resume}", flush=True)
 
     print(f"generating {args.samples} post-call value samples "
-          f"(round2_frac={args.round2_frac})...", flush=True)
+          f"(round2_frac={args.round2_frac}, alone_frac={args.alone_frac})...",
+          flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.seed,
-                            equity_model=equity_model)
+                            equity_model=equity_model, alone_frac=args.alone_frac)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

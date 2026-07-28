@@ -68,7 +68,8 @@ from rebel.train_rebel import ReBeLTrainer
 _ROUND2_PASS_WEIGHT = 0.6
 
 
-def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: float):
+def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: float,
+                    alone_frac: float = 0.5):
     """Deal, then apply a real bid (round 1 or, with round2_frac odds, a
     round-2 call reached via genuine passes, walked turn-by-turn) -- built on
     recalibrate_value.py's construction. Returns None on a round-2 walk that
@@ -77,6 +78,12 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
     existing defensive-skip style; a misdeal's trivial (0) value carries no
     useful gradient anyway, and its terminal state has no real acting player
     to build an observation from (current_player becomes the CHANCE sentinel).
+
+    `alone_frac` samples alone vs not-alone independently of round2_frac --
+    used to be hardcoded to not-alone only, which left alone's own value
+    estimate uncorrected while not-alone's got fixed, making alone look
+    relatively (not actually) better after grounding. See
+    recalibrate_value.py's build_samples() docstring for the full story.
 
     Always returns a fresh Phase.PLAY state (zero cards played) -- the same
     leaf type SubgameSolver's bidding-rooted solves actually use (see
@@ -93,7 +100,8 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
             return None
         for _ in range(4):
             legal = state.legal_actions()
-            calls = [a for a in legal if isinstance(a, Call) and not a.alone]
+            want_alone = rng.random() < alone_frac
+            calls = [a for a in legal if isinstance(a, Call) and a.alone == want_alone]
             passes = [a for a in legal if isinstance(a, Pass)]
             if passes and (not calls or rng.random() < _ROUND2_PASS_WEIGHT):
                 state = state.apply(passes[0])
@@ -104,19 +112,20 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
                 return None  # defensive; unreachable given the checks above
             return state.apply(rng.choice(calls))
         return None  # defensive; round 2 always resolves within 4 turns
-    dd_state = state.apply(OrderUp(alone=False))
+    want_alone = rng.random() < alone_frac
+    dd_state = state.apply(OrderUp(alone=want_alone))
     nxt, _ = resolve_dealer_discard(dd_state)
     return nxt
 
 
 def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
-                  stick_the_dealer=False, equity_model=None):
+                  stick_the_dealer=False, equity_model=None, alone_frac=0.5):
     helper = ReBeLTrainer(seed=seed, stick_the_dealer=stick_the_dealer,
                           equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
     while len(out) < n:
-        nxt = _land_post_call(helper, rng, round2_frac)
+        nxt = _land_post_call(helper, rng, round2_frac, alone_frac)
         if nxt is None:
             continue
         if rng.random() < deep_frac:
@@ -161,6 +170,11 @@ def main():
     ap.add_argument("--samples", type=int, default=4000)
     ap.add_argument("--val-frac", type=float, default=0.2)
     ap.add_argument("--round2-frac", type=float, default=0.3)
+    ap.add_argument("--alone-frac", type=float, default=0.5,
+                    help="fraction of grounded samples that call/order up "
+                         "alone, sampled independently of --round2-frac -- "
+                         "see _land_post_call()'s docstring for why this "
+                         "can't stay hardcoded to not-alone.")
     ap.add_argument("--deep-frac", type=float, default=0.5,
                     help="fraction of samples that keep playing random legal "
                          "actions forward past the post-call leaf before "
@@ -214,12 +228,13 @@ def main():
         print("starting from a fresh random-init net", flush=True)
 
     print(f"generating {args.samples} value-grounding samples "
-          f"(round2_frac={args.round2_frac}, deep_frac={args.deep_frac}, "
+          f"(round2_frac={args.round2_frac}, alone_frac={args.alone_frac}, "
+          f"deep_frac={args.deep_frac}, "
           f"stick_the_dealer={args.stick_the_dealer})...", flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.deep_frac,
                             args.max_deep_plies, args.seed,
                             stick_the_dealer=args.stick_the_dealer,
-                            equity_model=equity_model)
+                            equity_model=equity_model, alone_frac=args.alone_frac)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

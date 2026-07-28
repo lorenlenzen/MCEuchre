@@ -198,6 +198,53 @@ def test_cpp_engine_round2_seed_frac_self_play_runs():
     assert len(trainer.buffer) > 0
 
 
+_ALONE_IDX = 14  # global-block offset: len(_PHASES)=5 + dealer(4) + maker(5)
+
+
+def test_grounded_value_sample_covers_alone_and_not_alone():
+    """Regression test: alone/not-alone used to be hardcoded to not-alone
+    only, so grounding only ever corrected that branch's calibration and
+    left alone's own (equally unverified) estimate untouched -- diagnosed
+    this session from exactly that asymmetry surfacing after a fix. Confirm
+    both actually occur, roughly per _VALUE_GROUND_ALONE_FRAC (0.5)."""
+    from euchre.infoset import OBS_SIZE
+    trainer = ReBeLTrainer(value_ground_frac=1.0, seed=2)
+    assert trainer._VALUE_GROUND_ALONE_FRAC == 0.5
+    n_alone = n_not = 0
+    for _ in range(300):
+        s = trainer._grounded_value_sample()
+        if s is None:
+            continue
+        assert s.obs.shape == (OBS_SIZE,)
+        if s.obs[_ALONE_IDX] > 0.5:
+            n_alone += 1
+        else:
+            n_not += 1
+    assert n_alone > 0, "expected at least one alone-flagged grounded sample"
+    assert n_not > 0, "expected at least one not-alone grounded sample"
+    # Not a tight statistical test -- just confirms neither branch dominates
+    # to the point of the other being effectively unsampled.
+    total = n_alone + n_not
+    assert 0.25 < n_alone / total < 0.75, (n_alone, n_not)
+
+
+def test_cpp_engine_grounded_value_sample_covers_alone_and_not_alone():
+    trainer = ReBeLTrainer(engine="cpp", value_ground_frac=1.0, seed=2)
+    n_alone = n_not = 0
+    for _ in range(300):
+        s = trainer._grounded_value_sample()
+        if s is None:
+            continue
+        if s.obs[_ALONE_IDX] > 0.5:
+            n_alone += 1
+        else:
+            n_not += 1
+    assert n_alone > 0, "expected at least one alone-flagged grounded sample"
+    assert n_not > 0, "expected at least one not-alone grounded sample"
+    total = n_alone + n_not
+    assert 0.25 < n_alone / total < 0.75, (n_alone, n_not)
+
+
 def test_cpp_engine_grounded_value_sample_well_formed():
     from euchre.infoset import OBS_SIZE
     trainer = ReBeLTrainer(engine="cpp", value_ground_frac=1.0, seed=3)
