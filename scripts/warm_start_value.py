@@ -52,7 +52,7 @@ from euchre.game import Phase, team_of
 from euchre.infoset import observation_tensor
 from rebel.match_equity import MatchEquityModel
 from rebel.networks import PolicyValueNet
-from rebel.pimc import rollout_value
+from rebel.pimc import resolve_dealer_discard, rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
@@ -76,7 +76,15 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
     otherwise doesn't land on a callable state, matching this function's
     existing defensive-skip style; a misdeal's trivial (0) value carries no
     useful gradient anyway, and its terminal state has no real acting player
-    to build an observation from (current_player becomes the CHANCE sentinel)."""
+    to build an observation from (current_player becomes the CHANCE sentinel).
+
+    Always returns a fresh Phase.PLAY state (zero cards played) -- the same
+    leaf type SubgameSolver's bidding-rooted solves actually use (see
+    rebel/subgame.py's build()). Round 2's Call already lands there directly
+    (it skips DEALER_DISCARD entirely); round 1's OrderUp goes through
+    DEALER_DISCARD first, so it's resolved (best discard for the dealer's
+    team) before returning, rather than handing back the pre-discard state
+    the value net is never actually queried at."""
     state = helper._fresh_deal()
     if rng.random() < round2_frac:
         for _ in range(4):
@@ -96,7 +104,9 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
                 return None  # defensive; unreachable given the checks above
             return state.apply(rng.choice(calls))
         return None  # defensive; round 2 always resolves within 4 turns
-    return state.apply(OrderUp(alone=False))
+    dd_state = state.apply(OrderUp(alone=False))
+    nxt, _ = resolve_dealer_discard(dd_state)
+    return nxt
 
 
 def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,

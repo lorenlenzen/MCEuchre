@@ -251,6 +251,33 @@
       "current_trick": [],
       "answer_action": {"type": "play", "card": "QH"},
       "note": "The winning Ace is inferred as AD (the only card that legally follows TD's diamond lead and is an Ace). Seat3/seat4's unnarrated trick1 plays are filled as non-bower diamonds (JD would be the LEFT BOWER under hearts trump, an effective trump card that would beat the Ace -- caught by the trick-winner assertion), keeping 'you win' true."
+    },
+    {
+      "id": 26, "phase": "bid1", "buildable": true,
+      "score": [0, 3], "seat": "first", "up_card": "9C", "stick": false,
+      "hand": ["JS", "QD", "TD", "QH", "AD"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Pass", "answer_action": {"type": "pass"},
+      "score_dependent": false,
+      "note": "Flagged training correction. JS is the LEFT BOWER under clubs trump (spades/clubs same color) -- only 1 real trump, propped up by weak off-suit help (QD-TD-AD is 3 diamonds but no ace-high strength beyond the ace, QH a lone off-suit queen). Well below the order-up bar; agent wrongly ordered up not-alone."
+    },
+    {
+      "id": 27, "phase": "bid1", "buildable": true,
+      "score": [1, 4], "seat": "third", "up_card": "AC", "stick": false,
+      "hand": ["KC", "QC", "JH", "9H", "QD"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Pass", "answer_action": {"type": "pass"},
+      "score_dependent": false,
+      "note": "Flagged training correction. Third seat is not strong enough to order up."
+    },
+    {
+      "id": 28, "phase": "bid1", "buildable": true,
+      "score": [0, 2], "seat": "first", "up_card": "KH", "stick": false,
+      "hand": ["TC", "JH", "JS", "JD", "9D"],
+      "options": ["Pass", "Order Up"],
+      "answer": "Pass", "answer_action": {"type": "pass"},
+      "score_dependent": false,
+      "note": "Flagged training correction. Calling diamonds on bid2 is stronger."
     }
   ]
 }

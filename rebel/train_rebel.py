@@ -35,7 +35,7 @@ from euchre.game import EuchreState, Phase, team_of
 from euchre.infoset import observation_tensor, OBS_SIZE
 from .evaluate import PointCountAgent
 from .networks import PolicyValueNet
-from .pimc import rollout_value
+from .pimc import resolve_dealer_discard, rollout_value
 from .subgame import SubgameSolver
 
 if TYPE_CHECKING:
@@ -70,11 +70,13 @@ def batch_value_fn_from_net(net: PolicyValueNet):
 # Optional, opt-in (ReBeLTrainer(engine="cpp")): the engine/observation/
 # solver/CFR-search/network hot path ported to C++ (see cpp/README.md), each
 # piece differentially verified bit-for-bit / float-tight against this same
-# pure-Python implementation (tests/test_cpp_equivalence.py). Only the
-# self_play_hand() hot loop is engine-aware -- round2_seed_frac and
-# value_ground_frac stay Python-only (see ReBeLTrainer.__init__) since
-# they're low-frequency calibration features, not the hot path the C++ port
-# targets, and rely on rollout_value, which isn't ported.
+# pure-Python implementation (tests/test_cpp_equivalence.py). round2_seed_frac
+# and value_ground_frac are both engine-aware too (see _biased_deal /
+# _grounded_value_sample) -- value_ground_frac's cpp path uses
+# cpp_rollout_value below, a thin Python-level mirror of rebel.pimc's
+# rollout_value built on the already-bound mceuchre_cpp.solve_value, rather
+# than a new C++ port of rollout_value itself (it's a low-frequency
+# calibration call, not the self-play hot path the C++ port targets).
 def _cpp_module():
     # mceuchre_cpp.cp314-*.pyd is a loose build artifact in the repo root
     # (torch.utils.cpp_extension's build_ext --inplace output), not an
@@ -125,6 +127,74 @@ def cpp_batch_value_fn_from_net(net):
     return fn
 
 
+def _cpp_team_of(player: int) -> int:
+    return player % 2  # engine.h's convention; see cpp_batch_value_fn_from_net
+
+
+def cpp_resolve_dealer_discard(state):
+    """cpp-engine mirror of rebel.pimc.resolve_dealer_discard: try every
+    legal discard from a DealerDiscard state, returning
+    (resulting_state, raw team0-team1 value) for whichever is best for the
+    dealer's team, via mceuchre_cpp.solve_value. Needed by
+    ReBeLTrainer._grounded_value_sample so it can capture its observation
+    at the post-discard state the cpp SubgameSolver's bidding-rooted leaves
+    actually use (see rebel/subgame.py's build()), not the pre-discard
+    DealerDiscard state the value net is never queried at anymore."""
+    cpp = _cpp_module()
+    dealer_team = _cpp_team_of(state.dealer)
+    best_state = None
+    best_value = None
+    for a in state.legal_actions():
+        child = state.apply(a)
+        v = cpp.solve_value(child)
+        if best_value is None or (v > best_value if dealer_team == 0 else v < best_value):
+            best_value = v
+            best_state = child
+    return best_state, best_value
+
+
+def cpp_rollout_value(state, team0_score: Optional[int] = None,
+                      team1_score: Optional[int] = None,
+                      equity_model=None) -> float:
+    """cpp-engine mirror of rebel.pimc.rollout_value: resolves a pending
+    DEALER_DISCARD by trying every discard and keeping whichever is best for
+    the dealer's team (mceuchre_cpp.solve_value, PLAY phase only, exact --
+    same double-dummy alpha-beta as the Python solver, just compiled), then
+    converts to an equity delta at the same single return boundary the
+    Python version uses (`equity_model` here must be a
+    mceuchre_cpp.MatchEquityModel, e.g. ReBeLTrainer's own
+    `_cpp_equity_model`, not the plain Python MatchEquityModel).
+
+    Unlike rebel.solver.solve_value, mceuchre_cpp.solve_value doesn't accept
+    an external memo dict, so sibling discard solves below don't share a
+    transposition table the way the Python path's do -- a real but minor
+    performance difference (each discard's solve just redoes any shared
+    subtree from scratch), not a correctness one."""
+    cpp = _cpp_module()
+
+    def raw(s) -> int:
+        if s.is_terminal():
+            r = s.returns()
+            return r[0] - r[1]
+        if s.phase == cpp.Phase.Play:
+            return cpp.solve_value(s)
+        if s.phase == cpp.Phase.DealerDiscard:
+            _, best = cpp_resolve_dealer_discard(s)
+            return best
+        raise ValueError(f"cpp_rollout_value cannot start from phase {s.phase}")
+
+    r = raw(state)
+    if equity_model is not None:
+        assert team0_score is not None and team1_score is not None, (
+            "cpp_rollout_value: equity_model requires both team0_score and "
+            "team1_score")
+        p0, p1 = (r, 0) if r >= 0 else (0, -r)
+        dealer_is_team0 = _cpp_team_of(state.dealer) == 0
+        return equity_model.equity_delta(
+            team0_score, team1_score, dealer_is_team0, p0, p1)
+    return r
+
+
 @dataclass
 class Sample:
     obs: np.ndarray          # observation from the actor's perspective
@@ -145,7 +215,6 @@ class ReBeLTrainer:
                  cfr_iterations: int = 20, lr: float = 1e-3,
                  buffer_size: int = 20000, belief_model=None,
                  full_depth_cards: int = 0, seed: int = 0,
-                 bid_depth_limit: Optional[int] = None,
                  stick_the_dealer: bool = False,
                  grad_clip_norm: float = 5.0,
                  round2_seed_frac: float = 0.0,
@@ -154,18 +223,6 @@ class ReBeLTrainer:
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
             raise ValueError(f"engine must be 'python' or 'cpp', got {engine!r}")
-        if engine == "cpp" and value_ground_frac > 0:
-            # _grounded_value_sample calls rollout_value (rebel/pimc.py),
-            # which is deliberately Python-only (see the C++ port plan) --
-            # rather than silently falling back to slow Python for just
-            # this call, require the caller to pick one explicitly.
-            # round2_seed_frac does NOT have this restriction (see
-            # _biased_deal): it never calls rollout_value at all, it only
-            # needed engine-aware hand/up_card conversion, same as
-            # _cluster_key already has.
-            raise ValueError(
-                "value_ground_frac requires engine='python' "
-                "(it depends on rollout_value, which isn't ported to C++)")
         if engine == "cpp" and belief_model is not None:
             # cpp.SubgameSolver's production constructor only supports
             # uniform sample_determinization, not belief_model reweighting
@@ -192,14 +249,6 @@ class ReBeLTrainer:
         # way priority_ceiling bounds it to the sampling rate.
         self.grad_clip_norm = grad_clip_norm
         self.depth_limit = depth_limit
-        # Bidding decisions (BID_ROUND_1/2, DEALER_DISCARD) are the furthest
-        # in the game tree from the only exact solves this trainer ever does
-        # (the last full_depth_cards tricks of PLAY), so at the shared
-        # depth_limit they lean almost entirely on the value net's guess of
-        # how the rest of the hand plays out. Letting bidding search deeper
-        # gives it more real CFR-solved lookahead before falling back to the
-        # net. None = fall back to depth_limit (unchanged behaviour).
-        self.bid_depth_limit = bid_depth_limit
         # Off by default: EuchreState.new_hand() then lets round 2 fully pass
         # out into a misdeal, so self-play never faces a forced call. Turning
         # this on trains that decision instead of leaving it unseen.
@@ -283,6 +332,14 @@ class ReBeLTrainer:
         self.rng = random.Random(seed)
 
     def _depth_for(self, state) -> Optional[int]:
+        # Bidding/discard decisions no longer need their own depth budget:
+        # SubgameSolver._build now cuts a bidding-rooted solve exactly at the
+        # phase boundary (the auction expands fully regardless of the
+        # numeric depth_limit passed in, then the instant a child enters
+        # PLAY it's an immediate leaf) -- so any non-None value here behaves
+        # identically for those states. self.depth_limit is passed uniformly;
+        # only the full_depth_cards near-terminal PLAY case still needs None
+        # (genuinely unlimited, run to true terminal).
         is_play = (state.phase == self._cpp.Phase.Play if self.engine == "cpp"
                   else state.phase == Phase.PLAY)
         if self.engine == "cpp":
@@ -292,14 +349,6 @@ class ReBeLTrainer:
         if (self.full_depth_cards > 0 and is_play
                 and hand_size <= self.full_depth_cards):
             return None  # full-depth / exact
-        is_bid_or_discard = (
-            state.phase in (self._cpp.Phase.BidRound1, self._cpp.Phase.BidRound2,
-                            self._cpp.Phase.DealerDiscard) if self.engine == "cpp"
-            else state.phase in (Phase.BID_ROUND_1, Phase.BID_ROUND_2,
-                                 Phase.DEALER_DISCARD))
-        if is_bid_or_discard:
-            return (self.bid_depth_limit if self.bid_depth_limit is not None
-                    else self.depth_limit)
         return self.depth_limit
 
     _BUCKET_WIDTH = 0.4  # PointCountAgent's thresholds are 2.2/2.4/3.6, so this
@@ -508,16 +557,87 @@ class ReBeLTrainer:
     _VALUE_GROUND_ROUND2_FRAC = 0.3
 
     def _grounded_value_sample(self) -> Optional[Sample]:
-        """One exact rollout_value-grounded post-call sample, built the same
-        way recalibrate_value.py's build_samples() does -- a real deal, a
-        real call (round 1 directly, or round 2 via four genuine passes),
-        then the exact double-dummy value of the resulting state. No CFR, no
+        """One exact rollout_value-grounded sample, built the same way
+        recalibrate_value.py's build_samples() does -- a real deal, a real
+        call (round 1 directly, or round 2 via four genuine passes), then
+        the exact double-dummy value of the resulting state. No CFR, no
         dependence on the value net currently being trained, so it can't
         inherit that net's own bias. Returns None on the (rare, defensive)
         case a round-2 walk doesn't land on a callable state -- callers
         should just skip storing anything that turn rather than retry, to
-        avoid a hidden retry loop on a state space we already know is thin."""
+        avoid a hidden retry loop on a state space we already know is thin.
+
+        The captured leaf is always a *post-discard* state (trump fixed,
+        zero cards played) -- for round 2's Call that's automatic (it skips
+        DEALER_DISCARD entirely), but round 1's OrderUp needs an explicit
+        resolve_dealer_discard()/cpp_resolve_dealer_discard() call first.
+        This matters because SubgameSolver's bidding-rooted solves now cut
+        exactly at that same post-discard point (see rebel/subgame.py's
+        build()) -- the value net is never queried at the pre-discard
+        DEALER_DISCARD state itself, so grounding it there (the original
+        implementation) anchored a state the search doesn't actually use.
+
+        Engine-aware like _biased_deal / _cluster_key: the cpp branch swaps
+        in cpp.Action/cpp.ActionKind for the bid actions, cpp_rollout_value
+        (this module) for rollout_value, and self._cpp_equity_model (already
+        built in __init__ whenever an equity_model was given) for the plain
+        Python equity_model, since mceuchre_cpp.MatchEquityModel is a
+        different type with the same interface.
+
+        cluster_key is the same hand-strength bucket _cluster_key already
+        assigns real CFR bid decisions (computed here on the pre-call state,
+        i.e. round 1's original hand or round 2's post-pass hand), tagged
+        "..._ground" rather than reused bare -- keeps grounding samples
+        prioritized by hand strength too (previously every grounding sample
+        shared one flat ("value_ground",) bucket, so a weak-hand miscalibration
+        and a strong-hand one competed for the exact same replay priority)
+        while still keeping them visibly distinct from real policy-supervised
+        samples in cluster_stats()."""
         state = self._fresh_deal()
+        if self.engine == "cpp":
+            cpp = self._cpp
+            if self.rng.random() < self._VALUE_GROUND_ROUND2_FRAC:
+                for _ in range(4):
+                    state = state.apply(cpp.Action.pass_())
+                if state.phase != cpp.Phase.BidRound2:
+                    return None
+                calls = [a for a in state.legal_actions()
+                        if a.kind == cpp.ActionKind.Call and not a.alone]
+                if not calls:
+                    return None
+                pre_key = self._cluster_key(state, state.current_player)
+                # Call (round 2) skips DEALER_DISCARD entirely -- goes
+                # straight to Phase.Play (euchre/game.py's _apply_bid2 calls
+                # _begin_play() directly), so nxt is already the right kind
+                # of leaf and needs no further resolution.
+                nxt = state.apply(self.rng.choice(calls))
+            else:
+                pre_key = self._cluster_key(state, state.current_player)
+                dd_state = state.apply(cpp.Action.order_up(False))
+                # OrderUp (round 1) DOES go through DealerDiscard first --
+                # resolve it (best discard for the dealer's team) so nxt
+                # ends up at the same post-discard, fresh-Play-entry leaf
+                # type the cpp SubgameSolver's bidding-rooted solves
+                # actually use (see rebel/subgame.py's build()), not the
+                # pre-discard DealerDiscard state the value net is never
+                # queried at anymore.
+                nxt, _ = cpp_resolve_dealer_discard(dd_state)
+            ground_key = (pre_key[0] + "_ground",) + pre_key[1:]
+
+            v0 = cpp_rollout_value(nxt, team0_score=nxt.team0_score,
+                                   team1_score=nxt.team1_score,
+                                   equity_model=self._cpp_equity_model)
+            leaf_player = nxt.current_player
+            target = v0 if leaf_player % 2 == 0 else -v0
+            return Sample(
+                obs=np.asarray(cpp.observation_tensor(nxt, leaf_player)),
+                mask=cpp_legal_mask(nxt),
+                policy=np.zeros(NUM_ACTIONS, dtype=np.float32),  # unused,
+                                                                  # see supervise_policy
+                value=target,
+                cluster_key=ground_key,
+                supervise_policy=False)
+
         if self.rng.random() < self._VALUE_GROUND_ROUND2_FRAC:
             for _ in range(4):
                 state = state.apply(Pass())
@@ -527,9 +647,23 @@ class ReBeLTrainer:
                      if isinstance(a, Call) and not a.alone]
             if not calls:
                 return None
+            pre_key = self._cluster_key(state, state.current_player)
+            # Call (round 2) skips DEALER_DISCARD entirely -- goes straight
+            # to Phase.PLAY (_apply_bid2 calls _begin_play() directly), so
+            # nxt is already the right kind of leaf, no further resolution.
             nxt = state.apply(self.rng.choice(calls))
         else:
-            nxt = state.apply(OrderUp(alone=False))
+            pre_key = self._cluster_key(state, state.current_player)
+            dd_state = state.apply(OrderUp(alone=False))
+            # OrderUp (round 1) DOES go through DEALER_DISCARD first --
+            # resolve it (best discard for the dealer's team) so nxt ends up
+            # at the same post-discard, fresh-PLAY-entry leaf type
+            # SubgameSolver's bidding-rooted solves actually use (see
+            # rebel/subgame.py's build()), not the pre-discard
+            # DEALER_DISCARD state the value net is never queried at
+            # anymore.
+            nxt, _ = resolve_dealer_discard(dd_state)
+        ground_key = (pre_key[0] + "_ground",) + pre_key[1:]
 
         # exact -- all 4 hands already known; nxt already carries whatever
         # score _fresh_deal sampled (apply()/clone() preserve it), so no
@@ -545,7 +679,7 @@ class ReBeLTrainer:
             policy=np.zeros(NUM_ACTIONS, dtype=np.float32),  # unused, see
                                                               # supervise_policy
             value=target,
-            cluster_key=("value_ground",),
+            cluster_key=ground_key,
             supervise_policy=False)
 
     def self_play_hand(self) -> Tuple[int, int]:

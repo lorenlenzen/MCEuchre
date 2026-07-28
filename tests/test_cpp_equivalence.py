@@ -378,6 +378,255 @@ def test_solve_value_matches_full_hand(seed):
     assert py_val == cpp_val, f"solve_value mismatch seed={seed}: py={py_val} cpp={cpp_val}"
 
 
+# --- rollout_value (rebel.pimc) vs cpp_rollout_value (rebel.train_rebel) ---
+# cpp_rollout_value is a thin Python-level mirror (not a new C++ port) built
+# on the already-bound mceuchre_cpp.solve_value -- see rebel/train_rebel.py's
+# module docstring for why. These tests are the correctness gate for it, the
+# same role test_solve_value_matches_* plays for the lower-level solve.
+
+def _order_up_index(py_st, alone=False):
+    for a in py_st.legal_actions():
+        if isinstance(a, OrderUp) and a.alone == alone:
+            return action_to_index(a)
+    raise AssertionError("no matching OrderUp action legal in this state")
+
+
+def _call_index(py_st, alone=False):
+    for a in py_st.legal_actions():
+        if isinstance(a, Call) and a.alone == alone:
+            return action_to_index(a)
+    return None
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_rollout_value_matches_python_dealer_discard(seed):
+    """cpp_rollout_value must resolve a pending DEALER_DISCARD -- trying
+    every discard, keeping whichever is best for the dealer's team --
+    identically to rebel.pimc.rollout_value's pure-Python version. Reached
+    via a round-1 OrderUp(not alone), which always transitions straight to
+    DEALER_DISCARD."""
+    from rebel.pimc import rollout_value as py_rollout_value
+    from rebel.train_rebel import cpp_rollout_value
+    py_st, cpp_st = _deal_both(seed, dealer=seed % 4)
+    idx = _order_up_index(py_st, alone=False)
+    py_next, cpp_next = _apply_index(py_st, cpp_st, idx)
+    py_val = py_rollout_value(py_next)
+    cpp_val = cpp_rollout_value(cpp_next)
+    assert py_val == cpp_val, f"rollout_value mismatch seed={seed}: py={py_val} cpp={cpp_val}"
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_resolve_dealer_discard_value_matches_python(seed):
+    """resolve_dealer_discard/cpp_resolve_dealer_discard must agree on the
+    optimal discard's VALUE. The specific discarded CARD is allowed to
+    differ when multiple discards tie for that value (Python's and C++'s
+    legal_actions() enumeration orders differ, so ties break differently --
+    harmless, since each engine's own (state, value) pair stays internally
+    self-consistent regardless of which tied-optimal discard it picked)."""
+    from rebel.pimc import resolve_dealer_discard as py_resolve
+    from rebel.train_rebel import cpp_resolve_dealer_discard as cpp_resolve
+    from rebel.solver import solve_value as py_solve_value
+    py_st, cpp_st = _deal_both(seed, dealer=seed % 4)
+    idx = _order_up_index(py_st, alone=False)
+    py_dd, cpp_dd = _apply_index(py_st, cpp_st, idx)
+
+    py_next, py_val = py_resolve(py_dd)
+    cpp_next, cpp_val = cpp_resolve(cpp_dd)
+    assert py_val == cpp_val, (
+        f"resolve_dealer_discard value mismatch seed={seed}: py={py_val} cpp={cpp_val}")
+    # Each engine's returned state must independently justify its own value.
+    assert py_solve_value(py_next) == py_val
+    assert cpp.solve_value(cpp_next) == cpp_val
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_rollout_value_matches_python_round2_call(seed):
+    """Same, but reached via four real passes into BID_ROUND_2 then a
+    non-alone Call -- covers rollout_value's other entry point (straight
+    into PLAY, no DEALER_DISCARD involved)."""
+    from rebel.pimc import rollout_value as py_rollout_value
+    from rebel.train_rebel import cpp_rollout_value
+    for attempt in range(10):
+        py_st, cpp_st = _deal_both(seed * 100 + attempt, dealer=seed % 4)
+        pass_idx = action_to_index(Pass())
+        for _ in range(4):
+            py_st, cpp_st = _apply_index(py_st, cpp_st, pass_idx)
+        if py_st.phase != Phase.BID_ROUND_2:
+            continue
+        idx = _call_index(py_st, alone=False)
+        if idx is None:
+            continue
+        py_next, cpp_next = _apply_index(py_st, cpp_st, idx)
+        py_val = py_rollout_value(py_next)
+        cpp_val = cpp_rollout_value(cpp_next)
+        assert py_val == cpp_val, (
+            f"rollout_value mismatch seed={seed}: py={py_val} cpp={cpp_val}")
+        return
+    pytest.skip(f"couldn't reach a callable BID_ROUND_2 state for seed {seed}")
+
+
+# --- DEALER_DISCARD: free only as an internal node, not as the solve root -
+# Regression coverage for a real bug the phase-boundary fix introduced (see
+# rebel/subgame.py's build() and cpp/subgame.cpp's build()): treating
+# DEALER_DISCARD as always-free meant a discard-rooted solve was nothing but
+# the root plus 6 same-depth leaves -- no real search -- producing an
+# exactly-uniform policy regardless of net quality. Ported to both engines;
+# this is the differential half of that fix's verification.
+
+@pytest.mark.parametrize("seed", range(10))
+def test_dealer_discard_rooted_solve_matches_python(seed):
+    """With a zero value function, pure double-dummy CFR determines the
+    result -- if both engines now explore real depth into the resulting
+    hand instead of stopping at the root, they should still agree exactly,
+    the same correctness gate test_subgame_solver_depth_limited_matches
+    already applies to bidding-rooted solves."""
+    py_st, cpp_st = _deal_both(seed, dealer=seed % 4)
+    idx = _order_up_index(py_st, alone=False)
+    py_dd, cpp_dd = _apply_index(py_st, cpp_st, idx)
+    assert py_dd.phase == Phase.DEALER_DISCARD
+    assert cpp_dd.phase == cpp.Phase.DealerDiscard
+
+    py_solver = _py_solver_with_worlds(py_dd, py_dd.current_player, [py_dd], [1.0],
+                                       iterations=5, depth_limit=3,
+                                       batch_value_fn=_zero_batch_value_fn, equity_model=None)
+    cpp_solver = cpp.SubgameSolver(cpp_dd, cpp_dd.current_player, [cpp_dd], [1.0],
+                                   5, 3, _zero_batch_value_fn, None)
+
+    py_policy = {action_to_index(a): p for a, p in py_solver.root_policy().items()}
+    cpp_policy = cpp_solver.root_policy()
+    assert set(py_policy) == set(cpp_policy)
+    for idx2 in py_policy:
+        assert py_policy[idx2] == pytest.approx(cpp_policy[idx2], abs=1e-9), (
+            f"discard root_policy[{idx2}] mismatch seed={seed}: "
+            f"py={py_policy[idx2]} cpp={cpp_policy[idx2]}")
+
+
+def test_cpp_dealer_discard_root_policy_is_differentiated_with_trained_net():
+    """Same collapse check as the Python side
+    (test_subgame.py::test_dealer_discard_root_policy_is_differentiated_with_trained_net),
+    against the cpp engine -- this is what actually surfaced the bug (the
+    quiz runs the trained net, not a zero value function)."""
+    import os
+    net_path = "checkpoints/rebel_sa.pt"
+    if not os.path.exists(net_path):
+        pytest.skip(f"{net_path} not present in this checkout")
+    import torch
+    from rebel.networks import PolicyValueNet
+    from rebel.train_rebel import cpp_batch_value_fn_from_net
+
+    net = PolicyValueNet()
+    net.load_state_dict(torch.load(net_path, map_location="cpu"))
+    value_fn = cpp_batch_value_fn_from_net(net)
+
+    import random as _random
+    rng = _random.Random(0)
+    deck = list(range(24))
+    rng.shuffle(deck)
+    st = cpp.EuchreState.new_hand(dealer=rng.randint(0, 3)).deal_from_deck(deck)
+    st = st.apply(cpp.Action.order_up(False))
+    assert st.phase == cpp.Phase.DealerDiscard
+
+    solver = cpp.SubgameSolver(st, st.current_player, 8, 15, 6, value_fn, None, 0)
+    solver.run()
+    pol = solver.root_policy()
+    n = len(pol)
+    uniform = 1.0 / n
+    assert max(pol.values()) > uniform + 0.05, (
+        f"cpp root_policy looks uniform (max={max(pol.values()):.4f}, "
+        f"uniform={uniform:.4f}) -- discard search may have collapsed again")
+
+
+# --- BID_ROUND_2: same structural gap as DEALER_DISCARD, for Call ---------
+# Round 2's Call skips DealerDiscard entirely and goes straight to Play, so
+# a round-2-rooted solve's own Call/Call-alone/suit comparison had the same
+# "root's own action goes straight to an unbacked leaf" gap DealerDiscard
+# did -- surfaced as "every alone option outranks its same-suit non-alone
+# twin" on the quiz.
+
+@pytest.mark.parametrize("seed", range(10))
+def test_bid_round2_rooted_solve_matches_python(seed):
+    py_st, cpp_st = _deal_both(seed, dealer=seed % 4, stick_the_dealer=True)
+    pass_idx = action_to_index(Pass())
+    for _ in range(4):
+        py_st, cpp_st = _apply_index(py_st, cpp_st, pass_idx)
+    assert py_st.phase == Phase.BID_ROUND_2
+    assert cpp_st.phase == cpp.Phase.BidRound2
+
+    py_solver = _py_solver_with_worlds(py_st, py_st.current_player, [py_st], [1.0],
+                                       iterations=5, depth_limit=3,
+                                       batch_value_fn=_zero_batch_value_fn, equity_model=None)
+    cpp_solver = cpp.SubgameSolver(cpp_st, cpp_st.current_player, [cpp_st], [1.0],
+                                   5, 3, _zero_batch_value_fn, None)
+
+    py_policy = {action_to_index(a): p for a, p in py_solver.root_policy().items()}
+    cpp_policy = cpp_solver.root_policy()
+    assert set(py_policy) == set(cpp_policy)
+    for idx2 in py_policy:
+        assert py_policy[idx2] == pytest.approx(cpp_policy[idx2], abs=1e-9), (
+            f"round-2 root_policy[{idx2}] mismatch seed={seed}: "
+            f"py={py_policy[idx2]} cpp={cpp_policy[idx2]}")
+
+
+def test_cpp_bid_round2_root_policy_is_differentiated_with_trained_net():
+    import os
+    net_path = "checkpoints/rebel_sa.pt"
+    if not os.path.exists(net_path):
+        pytest.skip(f"{net_path} not present in this checkout")
+    import torch
+    from rebel.networks import PolicyValueNet
+    from rebel.train_rebel import cpp_batch_value_fn_from_net
+
+    net = PolicyValueNet()
+    net.load_state_dict(torch.load(net_path, map_location="cpu"))
+    value_fn = cpp_batch_value_fn_from_net(net)
+
+    import random as _random
+    rng = _random.Random(0)
+    deck = list(range(24))
+    rng.shuffle(deck)
+    st = cpp.EuchreState.new_hand(dealer=rng.randint(0, 3), stick_the_dealer=True).deal_from_deck(deck)
+    for _ in range(4):
+        st = st.apply(cpp.Action.pass_())
+    assert st.phase == cpp.Phase.BidRound2
+
+    solver = cpp.SubgameSolver(st, st.current_player, 8, 15, 6, value_fn, None, 0)
+    solver.run()
+    pol = solver.root_policy()
+    n = len(pol)
+    uniform = 1.0 / n
+    assert max(pol.values()) > uniform + 0.05, (
+        f"cpp round-2 root_policy looks uniform (max={max(pol.values()):.4f}, "
+        f"uniform={uniform:.4f}) -- search may have collapsed again")
+
+
+def test_rollout_value_equity_mode_matches_python():
+    """The equity-delta conversion boundary (team0_score/team1_score +
+    equity_model) must match too, not just the raw double-dummy path --
+    cpp_rollout_value takes a mceuchre_cpp.MatchEquityModel here, a
+    different type than rebel.match_equity.MatchEquityModel but built from
+    the same table (see ReBeLTrainer._cpp_equity_model)."""
+    from rebel.match_equity import MatchEquityModel
+    from rebel.pimc import rollout_value as py_rollout_value
+    from rebel.train_rebel import cpp_rollout_value
+    py_eq = MatchEquityModel.load("rebel/match_equity_table.json")
+    cpp_eq = cpp.MatchEquityModel(py_eq.target, py_eq.table.flatten().tolist())
+    rng = random.Random(0)
+    for trial in range(15):
+        t0, t1 = rng.randint(0, 9), rng.randint(0, 9)
+        py_st, cpp_st = _deal_both(trial, dealer=trial % 4,
+                                   team0_score=t0, team1_score=t1)
+        idx = _order_up_index(py_st, alone=False)
+        py_next, cpp_next = _apply_index(py_st, cpp_st, idx)
+        py_val = py_rollout_value(py_next, team0_score=py_next.team0_score,
+                                  team1_score=py_next.team1_score,
+                                  equity_model=py_eq)
+        cpp_val = cpp_rollout_value(cpp_next, team0_score=cpp_next.team0_score,
+                                    team1_score=cpp_next.team1_score,
+                                    equity_model=cpp_eq)
+        assert abs(py_val - cpp_val) < 1e-9, (
+            f"rollout_value equity mismatch trial={trial}: py={py_val} cpp={cpp_val}")
+
+
 # --- MatchEquityModel vs rebel.match_equity ---------------------------------
 
 def test_match_equity_model_matches_python():
@@ -562,6 +811,7 @@ def _py_solver_with_worlds(root, actor, worlds, weights, iterations, depth_limit
     solver.infosets = {}
     solver.worlds = worlds
     solver.weights = weights
+    solver.root_phase = root.phase
     solver.root_key = py_infoset_key(root, actor)
     solver.roots = None
     solver._pending_leaves = []

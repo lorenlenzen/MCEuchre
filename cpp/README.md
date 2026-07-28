@@ -83,29 +83,54 @@ test_cpp_net_trains_via_rebel_trainer_and_checkpoint_interops`).
 
 **Engine selector**: `ReBeLTrainer(engine="cpp")` (`rebel/train_rebel.py`)
 routes the `self_play_hand()` hot loop -- state, observation, solver, CFR
-search -- through the C++ path. `belief_model` and `value_ground_frac`
-depend on Python-only code (`rebel/belief_model.py`, `rebel/pimc.py`'s
-`rollout_value`) that wasn't ported, so `engine="cpp"` rejects them at
-construction rather than silently falling back to Python for just those
-calls. `round2_seed_frac` is NOT in that category -- `_biased_deal` never
-calls `rollout_value`, it only needed engine-aware hand/up_card conversion
-(same pattern as `_cluster_key`), so it works fine with `engine="cpp"`.
+search -- through the C++ path. `belief_model` depends on Python-only code
+(`rebel/belief_model.py`) that wasn't ported, so `engine="cpp"` rejects it at
+construction rather than silently falling back to Python for it.
+`round2_seed_frac` and `value_ground_frac` both work fine with
+`engine="cpp"`: `_biased_deal` never calls `rollout_value`, it only needed
+engine-aware hand/up_card conversion (same pattern as `_cluster_key`); and
+`_grounded_value_sample`'s cpp path uses `cpp_rollout_value`
+(`rebel/train_rebel.py`) -- a Python-level mirror built on the already-bound
+`mceuchre_cpp.solve_value`, not a new C++ port of `rebel/pimc.py`'s
+`rollout_value` itself.
 `net=` can be either a Python or C++ `PolicyValueNet`
 independently of `engine=` (leaf evaluation calls `net(obs)` generically
 either way); training the C++ net works via the ordinary `train_step`, no
 special-casing needed. `scripts/train_parallel.py` and
 `scripts/train_scale.py` both expose `--engine {python,cpp}`.
 
+## Subgame boundary = phase boundary (ported)
+
+`SubgameSolver::build` (`cpp/subgame.cpp`) mirrors `rebel/subgame.py`'s
+`_build` exactly: a bidding-rooted solve (BID_ROUND_1/2, DEALER_DISCARD)
+expands the whole auction regardless of `depth_limit_` -- it's short and
+bounded on its own (<=4 round-1 + <=4 round-2 decisions before trump is set
+or a real misdeal terminal) -- and the instant a child's phase becomes
+`Play`, that child is an immediate leaf, never recursed into. This removed
+`--bid-depth-limit` entirely (see `checkpoints/README.md`'s pre-redesign
+notes for why it became pointless) and fixed the same structural
+OrderUp/Call-vs-Pass asymmetry on the C++ path the Python fix targets:
+previously OrderUp/Call reached real search-backed leaves within a few plies
+while Pass got cut off deep in still-uncertain bidding, biased almost
+entirely on an unverified net guess. Verified bit-for-bit identical to
+Python (`tests/test_cpp_equivalence.py::test_subgame_solver_depth_limited_matches`,
+a BID_ROUND_1-rooted depth-limited solve, `root_policy` matching to 1e-9).
+
 ## Measured payoff
 
 Real wall-clock `self_play_hand()` time, single actor, production settings
-(`--num-worlds 24 --cfr-iters 60 --depth-limit 6 --bid-depth-limit 6
---full-depth-cards 2 --stick-the-dealer`), 6 hands each, same seed:
+(`--num-worlds 24 --cfr-iters 60 --depth-limit 6 --full-depth-cards 2
+--stick-the-dealer`), 6 hands each, same seed:
 
 | engine | mean s/hand |
 |---|---|
 | python | 49.97 |
 | cpp    | 14.47 |
+
+(Measured before the subgame-boundary fix above -- bidding-rooted solves are
+now both correct *and* faster than they were here, so a fresh `self_play_hand()`
+number would look better than this table on both engines; not re-measured
+end-to-end yet.)
 
 **~3.45x wall-clock speedup** -- real, but well below the ~10-30x figure
 floated earlier in planning (explicitly caveated at the time as "a guess,

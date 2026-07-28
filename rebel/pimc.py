@@ -46,6 +46,35 @@ def _team_sign(value_team0: int, team: int) -> int:
     return value_team0 if team == 0 else -value_team0
 
 
+def resolve_dealer_discard(state: EuchreState,
+                           memo: Optional[dict] = None
+                           ) -> "tuple[EuchreState, int]":
+    """Try every legal discard from a DEALER_DISCARD state, returning
+    (resulting_state, raw team0-team1 value) for whichever discard is best
+    for the dealer's team -- the same resolution _rollout_value_raw's own
+    DEALER_DISCARD branch does internally, but also handing back the
+    resulting post-discard state (the moment trump is truly settled and
+    play is about to begin), not just its value. Needed by
+    ReBeLTrainer._grounded_value_sample: since the CFR subgame solver's
+    bidding-rooted leaves are now exactly these post-discard states (see
+    rebel/subgame.py's build()), a grounding sample has to be captured
+    here, not at the pre-discard DEALER_DISCARD state itself -- the value
+    net is never actually queried at that point anymore."""
+    assert state.phase == Phase.DEALER_DISCARD
+    dealer_team = team_of(state.dealer)
+    best_state: Optional[EuchreState] = None
+    best_value: Optional[int] = None
+    shared = memo if memo is not None else {}
+    for a in state.legal_actions():
+        child = state.apply(a)
+        v = _rollout_value_raw(child, shared)
+        if best_value is None or (v > best_value if dealer_team == 0 else v < best_value):
+            best_value = v
+            best_state = child
+    assert best_state is not None and best_value is not None
+    return best_state, best_value
+
+
 def _rollout_value_raw(state: EuchreState, memo: Optional[dict] = None) -> int:
     """Exact team0-team1 point differential under optimal play from a fully
     determined state -- the actual recursive minimax/enumeration, entirely
@@ -61,13 +90,7 @@ def _rollout_value_raw(state: EuchreState, memo: Optional[dict] = None) -> int:
     if state.phase == Phase.PLAY:
         return solve_value(state, memo)
     if state.phase == Phase.DEALER_DISCARD:
-        dealer_team = team_of(state.dealer)
-        best: Optional[int] = None
-        shared: dict = {}
-        for a in state.legal_actions():
-            v = _rollout_value_raw(state.apply(a), shared)
-            if best is None or (v > best if dealer_team == 0 else v < best):
-                best = v
+        _, best = resolve_dealer_discard(state, memo)
         return best
     raise ValueError(f"rollout_value cannot start from phase {state.phase}")
 
@@ -100,7 +123,6 @@ def rollout_value(state: EuchreState, memo: Optional[dict] = None,
         return equity_model.equity_delta(
             team0_score, team1_score, dealer_is_team0, p0, p1)
     return raw
-    raise ValueError(f"rollout_value cannot start from phase {state.phase}")
 
 
 class PIMCAgent:

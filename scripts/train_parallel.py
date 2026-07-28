@@ -13,7 +13,7 @@ handful here, tens on a big server. It does NOT change per-target quality --
 same worlds/depth/belief config as the single-process trainer.
 
     python scripts/train_parallel.py --actors 3 --minutes 30 \
-        --num-worlds 24 --cfr-iters 60 --depth-limit 6 --full-depth-cards 2 \
+        --num-worlds 24 --cfr-iters 60 --depth-limit 6 --full-depth-cards 3 \
         --resume checkpoints/rebel_hq.pt --out /path/rebel_par
 
 Runs for --minutes (bursts fit this ephemeral container), checkpointing and
@@ -36,9 +36,9 @@ torch.set_num_threads(1)
 import multiprocessing as mp  # noqa: E402
 
 
-def _atomic_save(net, path, retries=20, delay=0.5):
+def _atomic_save(state_dict, path, retries=20, delay=0.5):
     tmp = path + ".tmp"
-    torch.save(net.state_dict(), tmp)
+    torch.save(state_dict, tmp)
     # os.replace is atomic on POSIX regardless of readers, but on Windows it
     # maps to MoveFileEx and can raise PermissionError (WinError 5) if an
     # actor process has `path` open via torch.load() at this exact instant --
@@ -55,8 +55,9 @@ def _atomic_save(net, path, retries=20, delay=0.5):
     # take down a multi-hour unattended run: warn and skip this cycle rather
     # than raising. Actors just keep the previous weights (or the eval
     # checkpoint stays one cycle stale) until the next successful save --
-    # the buffer and optimizer state aren't checkpointed either way, so a
-    # crash here is a strictly worse outcome than a skipped publish.
+    # the buffer isn't checkpointed either way (see resume's cold-buffer
+    # note), so a crash here is a strictly worse outcome than a skipped
+    # publish.
     for attempt in range(retries):
         try:
             os.replace(tmp, path)
@@ -98,7 +99,6 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
     t = ReBeLTrainer(
         net=PolicyValueNet(), num_worlds=cfg["worlds"],
         cfr_iterations=cfg["iters"], depth_limit=cfg["depth"],
-        bid_depth_limit=cfg["bid_depth"],
         full_depth_cards=cfg["fdc"], belief_model=belief_model,
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
         value_ground_frac=cfg["value_ground"], equity_model=equity_model,
@@ -148,15 +148,7 @@ def main():
     ap.add_argument("--num-worlds", type=int, default=24)
     ap.add_argument("--cfr-iters", type=int, default=60)
     ap.add_argument("--depth-limit", type=int, default=6)
-    ap.add_argument("--bid-depth-limit", type=int, default=None,
-                    help="deeper depth limit for bidding-phase decisions "
-                         "(BID_ROUND_1/2, DEALER_DISCARD); defaults to "
-                         "--depth-limit if unset. Bidding is the furthest "
-                         "any decision sits from the trainer's only exact "
-                         "solves (the last --full-depth-cards tricks), so "
-                         "it benefits from more real lookahead before "
-                         "falling back to the value net.")
-    ap.add_argument("--full-depth-cards", type=int, default=2)
+    ap.add_argument("--full-depth-cards", type=int, default=3)
     ap.add_argument("--stick-the-dealer", action="store_true",
                     help="force the dealer to call in round 2 instead of "
                          "letting a full pass-out misdeal the hand. Off by "
@@ -231,23 +223,20 @@ def main():
                          "loop -- differentially verified bit-for-bit "
                          "against the Python path in "
                          "tests/test_cpp_equivalence.py. Drops belief_model "
-                         "reweighting (not ported) and is incompatible with "
-                         "--value-ground-frac (depends on rollout_value, "
-                         "also not ported) -- --round2-seed-frac works fine "
-                         "with --engine cpp, it never calls rollout_value. "
-                         "The learner process (this one) always uses the "
-                         "Python engine regardless -- it only owns the "
+                         "reweighting (not ported). --value-ground-frac and "
+                         "--round2-seed-frac both work fine with --engine "
+                         "cpp -- value_ground_frac's cpp path uses "
+                         "cpp_rollout_value (rebel/train_rebel.py), a "
+                         "Python-level mirror built on the already-bound "
+                         "mceuchre_cpp.solve_value, not a new C++ port. The "
+                         "learner process (this one) always uses the Python "
+                         "engine regardless -- it only owns the "
                          "buffer/train_step, never self-play.")
     args = ap.parse_args()
 
     from rebel.train_rebel import ReBeLTrainer
     from rebel.networks import PolicyValueNet
 
-    if args.engine == "cpp" and args.value_ground_frac > 0:
-        print("error: --engine cpp is incompatible with --value-ground-frac "
-              "(it depends on rollout_value, which "
-              "isn't ported to C++)", flush=True)
-        sys.exit(1)
     print(f"actor engine: {args.engine}", flush=True)
 
     equity_table_path = None
@@ -271,6 +260,27 @@ def main():
         print(f"resumed from {args.resume}", flush=True)
     # The learner reuses ReBeLTrainer purely for its buffer + train_step.
     learner = ReBeLTrainer(net=net, lr=args.lr, grad_clip_norm=args.grad_clip_norm)
+    if args.resume:
+        # Adam's per-parameter momentum/variance state is checkpointed
+        # alongside the weights (a sibling <resume-without-.pt>.opt.pt file,
+        # not embedded in the same file, so every other loader of a plain
+        # .pt checkpoint -- quiz_eval.py, export_web_model.py, the
+        # recalibration scripts -- is unaffected). Without this, every
+        # resume restarted Adam from zero state, which is known to produce
+        # less-calibrated, noisier early updates until those running
+        # averages re-stabilize -- on top of the replay buffer itself also
+        # starting cold (never checkpointed; that part is unavoidable
+        # without saving the buffer too, not attempted here). Missing
+        # sidecar (older checkpoints, or ones produced by a script that
+        # never had an optimizer) just means starting Adam fresh, same as
+        # before this existed.
+        opt_path = os.path.splitext(args.resume)[0] + ".opt.pt"
+        if os.path.exists(opt_path):
+            learner.opt.load_state_dict(torch.load(opt_path, map_location="cpu"))
+            print(f"resumed optimizer state from {opt_path}", flush=True)
+        else:
+            print(f"no optimizer state at {opt_path} -- starting Adam fresh",
+                  flush=True)
 
     # 'fork' is fast/low-overhead but Linux-only; Windows has only 'spawn',
     # and 'fork' is unsafe with torch on macOS -- so use fork only on Linux.
@@ -284,12 +294,12 @@ def main():
         ctx = mp.get_context("spawn")
     print(f"multiprocessing start method: {ctx.get_start_method()}", flush=True)
     weights_path = args.out + ".weights.pt"
-    _atomic_save(net, weights_path)
+    _atomic_save(net.state_dict(), weights_path)
     version = ctx.Value("i", 1)
     stop_flag = ctx.Value("i", 0)
     samples_q = ctx.Queue(maxsize=4000)
     cfg = {"worlds": args.num_worlds, "iters": args.cfr_iters,
-           "depth": args.depth_limit, "bid_depth": args.bid_depth_limit,
+           "depth": args.depth_limit,
            "fdc": args.full_depth_cards, "stick": args.stick_the_dealer,
            "round2_seed": args.round2_seed_frac,
            "value_ground": args.value_ground_frac,
@@ -310,7 +320,27 @@ def main():
     total = 0
     last_pub = start
     last_eval = start
+    # Resuming (--resume, same --out) restarts this process's own clocks/
+    # counters from zero, but the eval trend only means something plotted
+    # across the whole training history -- so if a log from a prior run of
+    # this --out is on disk, keep appending to it instead of overwriting,
+    # carrying its last elapsed_s/samples forward as an offset so the new
+    # entries' x-axis stays continuous instead of jumping back to 0.
+    log_path = args.out + ".log.json"
     log = []
+    elapsed_offset = 0
+    samples_offset = 0
+    if os.path.exists(log_path):
+        try:
+            log = json.load(open(log_path))
+        except (json.JSONDecodeError, OSError):
+            log = []
+        if log:
+            elapsed_offset = log[-1]["elapsed_s"]
+            samples_offset = log[-1]["samples"]
+            print(f"resuming eval log from {log_path} "
+                  f"({len(log)} entries, {elapsed_offset}s / "
+                  f"{samples_offset} samples so far)", flush=True)
     # Accumulates new samples between training steps. Steps are taken at a
     # rate proportional to fresh data (samples_per_step) rather than a fixed
     # count every cycle -- at low actor throughput, a flat step count per
@@ -344,7 +374,7 @@ def main():
 
             now = time.time()
             if now - last_pub >= args.publish_secs:
-                _atomic_save(net, weights_path)
+                _atomic_save(net.state_dict(), weights_path)
                 version.value += 1
                 last_pub = now
 
@@ -352,9 +382,11 @@ def main():
                 vr, wr, vu, wu = _evaluate(net, args.eval_hands,
                                            seed=100 + len(log),
                                            stick_the_dealer=args.stick_the_dealer)
-                hands_est = total // 13  # ~13 samples/hand
+                cum_samples = samples_offset + total
+                hands_est = cum_samples // 13  # ~13 samples/hand
                 top_clusters = learner.cluster_stats()
-                entry = {"elapsed_s": round(now - start), "samples": total,
+                entry = {"elapsed_s": elapsed_offset + round(now - start),
+                         "samples": cum_samples,
                          "hands_est": hands_est, "buffer": len(learner.buffer),
                          "vs_random": round(vr, 3), "win_random": round(wr, 3),
                          "vs_rule": round(vu, 3), "win_rule": round(wu, 3),
@@ -367,8 +399,9 @@ def main():
                     tc = ", ".join(f"{r['key']}:{r['sample_share']:.0%}"
                                   for r in top_clusters)
                     print(f"       top clusters (sample share): {tc}", flush=True)
-                _atomic_save(net, args.out + ".pt")
-                json.dump(log, open(args.out + ".log.json", "w"), indent=2)
+                _atomic_save(net.state_dict(), args.out + ".pt")
+                _atomic_save(learner.opt.state_dict(), args.out + ".opt.pt")
+                json.dump(log, open(log_path, "w"), indent=2)
                 last_eval = now
     finally:
         stop_flag.value = 1
@@ -383,8 +416,9 @@ def main():
             a.join(timeout=3)
             if a.is_alive():
                 a.terminate()
-        _atomic_save(net, args.out + ".pt")
-        json.dump(log, open(args.out + ".log.json", "w"), indent=2)
+        _atomic_save(net.state_dict(), args.out + ".pt")
+        _atomic_save(learner.opt.state_dict(), args.out + ".opt.pt")
+        json.dump(log, open(log_path, "w"), indent=2)
 
     rate = total / max(time.time() - start, 1)
     print(f"done: {total} samples (~{total // 13} hands) in "

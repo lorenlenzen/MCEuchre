@@ -44,12 +44,21 @@ python scripts/build_match_equity_table.py --out rebel/match_equity_table.json
 python scripts/warm_start_value.py --out checkpoints/rebel_sa_warm --samples 4000
 python scripts/train_parallel.py --resume checkpoints/rebel_sa_warm.pt \
   --actors 7 --minutes 900 --num-worlds 24 --cfr-iters 60 --depth-limit 6 \
-  --bid-depth-limit 6 --full-depth-cards 2 --value-ground-frac 0.1 \
+  --full-depth-cards 3 --value-ground-frac 0.1 \
   --out checkpoints/rebel_sa
 ```
 
 Pass `--no-match-equity` to either script to train raw-point/score-blind
 instead (e.g. for an ablation comparison against a match-equity run).
+
+`--full-depth-cards 3` (up from 2): measured not significantly slower than 2
+after the subgame-boundary fix -- Euchre's follow-suit rule keeps the actual
+legal-play branching low late in a trick regardless of hand size, and
+`solve_value`'s transposition table catches most of the repeated subtrees on
+top of that. One more card of *exact* endgame grounding for roughly the same
+cost is a clean win, for the same reason `--value-ground-frac` matters: it's
+real, non-circular signal the value head can't get by training on its own
+bootstrapped guesses.
 
 `--value-ground-frac` (see Milestone-3.5-adjacent work this session) mixes a
 steady trickle of the same kind of grounded sample into every live training
@@ -60,11 +69,19 @@ did before — the original failure this whole investigation traced back to.
 
 ## Below: pre-redesign notes (kept for reference)
 
-Written for `rebel_hq.pt`, before Milestone 3.5. The bid-depth-limit solve-time
-benchmarks are still architecturally relevant (they measure CFR tree cost, not
-network internals) and `--samples-per-step` behavior is unchanged; the
-`--resume checkpoints/rebel_hq.pt` example itself is stale per the warning
-above.
+Written for `rebel_hq.pt`, before Milestone 3.5. `--samples-per-step`
+behavior is unchanged and the `--resume checkpoints/rebel_hq.pt` example
+itself is stale per the warning above. **`--bid-depth-limit` itself is gone
+now** -- a later fix moved the CFR subgame boundary to the phase boundary
+(bidding-rooted solves expand the whole auction and cut exactly when trump
+gets fixed, instead of sharing a flat ply budget with real card play), which
+made a separate bidding depth pointless: any bidding-rooted solve behaves
+identically regardless of what `--bid-depth-limit` was set to, once it's set
+at all. The solve-time benchmarks below are kept purely as a historical
+record of the old flat-ply-budget cost curve; they don't describe current
+behavior (bidding-rooted solves are now both correct *and* faster than any
+row in that table -- ~35ms/decision at num-worlds 24, cfr-iters 60,
+depth-limit 6, cpp engine).
 
 Warm-start with:
 ```

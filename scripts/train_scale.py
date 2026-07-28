@@ -31,10 +31,6 @@ def main() -> None:
     ap.add_argument("--num-worlds", type=int, default=6)
     ap.add_argument("--cfr-iters", type=int, default=12)
     ap.add_argument("--depth-limit", type=int, default=4)
-    ap.add_argument("--bid-depth-limit", type=int, default=None,
-                    help="deeper depth limit for bidding-phase decisions "
-                         "(BID_ROUND_1/2, DEALER_DISCARD); defaults to "
-                         "--depth-limit if unset")
     ap.add_argument("--full-depth-cards", type=int, default=0,
                     help="solve to terminal when <= this many cards remain")
     ap.add_argument("--stick-the-dealer", action="store_true",
@@ -78,17 +74,15 @@ def main() -> None:
                          "built first: python setup.py build_ext --inplace), "
                          "differentially verified bit-for-bit against the "
                          "Python path in tests/test_cpp_equivalence.py. "
-                         "Drops belief_model reweighting (not ported) and "
-                         "is incompatible with --value-ground-frac (depends "
-                         "on rollout_value, also not ported) -- "
-                         "--round2-seed-frac works fine with --engine cpp, "
-                         "it never calls rollout_value.")
+                         "Drops belief_model reweighting (not ported). "
+                         "--value-ground-frac and --round2-seed-frac both "
+                         "work fine with --engine cpp -- value_ground_frac's "
+                         "cpp path uses cpp_rollout_value "
+                         "(rebel/train_rebel.py), a Python-level mirror "
+                         "built on the already-bound mceuchre_cpp.solve_value, "
+                         "not a new C++ port.")
     args = ap.parse_args()
 
-    if args.engine == "cpp" and args.value_ground_frac > 0:
-        print("error: --engine cpp is incompatible with --value-ground-frac "
-              "(it depends on rollout_value, which isn't ported to C++)")
-        sys.exit(1)
     print(f"self-play engine: {args.engine}")
 
     equity_model = None
@@ -113,7 +107,7 @@ def main() -> None:
 
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
-        depth_limit=args.depth_limit, bid_depth_limit=args.bid_depth_limit,
+        depth_limit=args.depth_limit,
         full_depth_cards=args.full_depth_cards,
         stick_the_dealer=args.stick_the_dealer, equity_model=equity_model,
         grad_clip_norm=args.grad_clip_norm,
@@ -123,6 +117,19 @@ def main() -> None:
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")
+        # Adam's per-parameter momentum/variance state, checkpointed
+        # alongside the weights as a sibling <resume-without-.pt>.opt.pt
+        # file (not embedded in the same file, so quiz_eval.py and every
+        # other plain-state_dict loader is unaffected) -- see
+        # train_parallel.py's resume block for the full rationale. Missing
+        # sidecar (older checkpoints) just means starting Adam fresh, same
+        # as before this existed.
+        opt_path = os.path.splitext(args.resume)[0] + ".opt.pt"
+        if os.path.exists(opt_path):
+            trainer.opt.load_state_dict(torch.load(opt_path))
+            print(f"resumed optimizer state from {opt_path}")
+        else:
+            print(f"no optimizer state at {opt_path} -- starting Adam fresh")
 
     log = []
     total_hands = 0
@@ -167,6 +174,7 @@ def main() -> None:
                               for r in top_clusters)
                 print(f"       top clusters (sample share): {tc}", flush=True)
             torch.save(trainer.net.state_dict(), args.out + ".pt")
+            torch.save(trainer.opt.state_dict(), args.out + ".opt.pt")
             json.dump(log, open(args.out + ".log.json", "w"), indent=2)
 
     print(f"\nDone: {total_hands} hands in {time.time() - t0:.0f}s. "

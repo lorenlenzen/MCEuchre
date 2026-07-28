@@ -94,18 +94,21 @@ def test_net_agent_plays_legally():
 # Python path (world sampling isn't required to match, see cpp/belief.cpp's
 # docstring) -- these confirm the C++ self-play hot path actually runs
 # end-to-end and produces well-formed samples/training updates, and that the
-# documented incompatibilities (belief_model, value_ground_frac -- both
-# depend on un-ported Python-only features) are rejected up front rather
-# than failing deep inside self-play. round2_seed_frac is NOT one of these:
-# _biased_deal never calls rollout_value, it only needed engine-aware
-# hand/up_card conversion (same as _cluster_key already has) -- see
-# test_cpp_engine_biased_deal_works below. -------------
+# one remaining documented incompatibility (belief_model, which depends on
+# rebel/belief_model.py, itself un-ported) is rejected up front rather than
+# failing deep inside self-play. round2_seed_frac and value_ground_frac are
+# NOT incompatibilities: _biased_deal never calls rollout_value (only needed
+# engine-aware hand/up_card conversion, same as _cluster_key -- see
+# test_cpp_engine_biased_deal_works below), and value_ground_frac's cpp path
+# uses cpp_rollout_value (a Python-level mirror built on the already-bound
+# mceuchre_cpp.solve_value, see rebel/train_rebel.py) instead of
+# rebel.pimc.rollout_value -- see test_cpp_engine_value_ground_frac_self_play_runs
+# below and the cpp_rollout_value differential tests in
+# test_cpp_equivalence.py. -------------
 
 def test_cpp_engine_rejects_unsupported_options():
     with pytest.raises(ValueError):
         ReBeLTrainer(engine="nonsense")
-    with pytest.raises(ValueError):
-        ReBeLTrainer(engine="cpp", value_ground_frac=0.1)
     with pytest.raises(ValueError):
         ReBeLTrainer(engine="cpp", belief_model=object())
 
@@ -190,6 +193,96 @@ def test_cpp_engine_biased_deal_matches_python_achievable_range():
 def test_cpp_engine_round2_seed_frac_self_play_runs():
     trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=2, depth_limit=2,
                            engine="cpp", round2_seed_frac=1.0, seed=0)
+    result = trainer.self_play_hand()
+    assert sum(result) in (0, 1, 2, 4)
+    assert len(trainer.buffer) > 0
+
+
+def test_cpp_engine_grounded_value_sample_well_formed():
+    from euchre.infoset import OBS_SIZE
+    trainer = ReBeLTrainer(engine="cpp", value_ground_frac=1.0, seed=3)
+    n_ok = 0
+    for _ in range(30):
+        s = trainer._grounded_value_sample()
+        if s is None:
+            continue
+        n_ok += 1
+        assert s.obs.shape == (OBS_SIZE,)
+        assert s.mask.dtype == bool
+        assert s.supervise_policy is False
+        assert s.cluster_key[0] in ("bid1_ground", "bid2_ground"), s.cluster_key
+        assert isinstance(s.cluster_key[1], int)
+        assert np.isfinite(s.value)
+    assert n_ok > 0, "expected at least one non-None grounded sample in 30 tries"
+
+
+def test_resolve_dealer_discard_lands_on_fresh_play_state():
+    """The retargeting fix: resolve_dealer_discard must return a state at
+    the same leaf type SubgameSolver's bidding-rooted solves actually use
+    (Phase.PLAY, zero cards played) -- not the pre-discard DEALER_DISCARD
+    state -- and its returned value must be self-consistent (an independent
+    solve_value on the returned state matches exactly)."""
+    from euchre.game import EuchreState, Phase
+    from euchre.actions import OrderUp
+    from rebel.pimc import resolve_dealer_discard
+    from rebel.solver import solve_value
+
+    for seed in range(15):
+        rng = random.Random(seed)
+        st = EuchreState.new_hand(dealer=rng.randint(0, 3)).deal(rng)
+        dd = st.apply(OrderUp(alone=False))
+        assert dd.phase == Phase.DEALER_DISCARD
+        nxt, value = resolve_dealer_discard(dd)
+        assert nxt.phase == Phase.PLAY
+        assert nxt.completed_tricks == []
+        assert nxt.current_trick == []
+        assert len(nxt.hands[dd.dealer]) == 5
+        assert value == solve_value(nxt)
+
+
+def test_cpp_resolve_dealer_discard_lands_on_fresh_play_state():
+    import mceuchre_cpp as cpp
+    from rebel.train_rebel import cpp_resolve_dealer_discard
+
+    for seed in range(15):
+        rng = random.Random(seed)
+        deck = list(range(24))
+        rng.shuffle(deck)
+        st = cpp.EuchreState.new_hand(dealer=rng.randint(0, 3)).deal_from_deck(deck)
+        dd = st.apply(cpp.Action.order_up(False))
+        assert dd.phase == cpp.Phase.DealerDiscard
+        nxt, value = cpp_resolve_dealer_discard(dd)
+        assert nxt.phase == cpp.Phase.Play
+        assert list(nxt.completed_tricks) == []
+        assert list(nxt.current_trick) == []
+        assert bin(nxt.hands[dd.dealer]).count("1") == 5
+        assert value == cpp.solve_value(nxt)
+
+
+def test_cpp_engine_grounded_value_sample_equity_aware():
+    """value_ground_frac's cpp path also needs to honor equity_model when
+    one is set (mirrors test_cpp_engine_equity_aware_self_play_runs below,
+    which covers the CFR-search path but not this separate one)."""
+    from rebel.match_equity import MatchEquityModel
+    eq = MatchEquityModel.load("rebel/match_equity_table.json")
+    trainer = ReBeLTrainer(engine="cpp", value_ground_frac=1.0,
+                           equity_model=eq, seed=4)
+    assert trainer._cpp_equity_model is not None
+    n_ok = 0
+    for _ in range(30):
+        s = trainer._grounded_value_sample()
+        if s is None:
+            continue
+        n_ok += 1
+        # equity units are a win-probability delta, bounded in [-1, 1]
+        assert -1.0 <= s.value <= 1.0
+    assert n_ok > 0
+
+
+@pytest.mark.slow
+def test_cpp_engine_value_ground_frac_self_play_runs():
+    trainer = ReBeLTrainer(num_worlds=2, cfr_iterations=2, depth_limit=2,
+                           engine="cpp", value_ground_frac=1.0, seed=5)
     result = trainer.self_play_hand()
     assert sum(result) in (0, 1, 2, 4)
     assert len(trainer.buffer) > 0

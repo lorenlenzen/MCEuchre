@@ -26,7 +26,7 @@ import random
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from euchre.actions import Action
-from euchre.game import EuchreState, team_of
+from euchre.game import EuchreState, Phase, team_of
 from euchre.infoset import infoset_key
 from .public_belief_state import sample_determinization
 
@@ -132,6 +132,7 @@ class SubgameSolver:
             self.worlds = [sample_determinization(root, actor, self.rng)
                            for _ in range(num_worlds)]
             self.weights = [1.0 / num_worlds] * num_worlds
+        self.root_phase = root.phase
         self.root_key = infoset_key(root, actor)
         self.roots: Optional[List[_TNode]] = None
         self._pending_leaves: List[Tuple[_TNode, EuchreState]] = []
@@ -171,7 +172,84 @@ class SubgameSolver:
         if info is None:
             info = _Info(state.legal_actions())
             self.infosets[key] = info
-        children = [self._build(state.apply(a), depth + 1) for a in info.actions]
+        # The subgame boundary is the PHASE boundary, not a fixed ply count,
+        # for bidding/discard nodes (BID_ROUND_1/2, DEALER_DISCARD): they
+        # expand FULLY (no depth cutoff at all while still bidding -- the
+        # auction is short and bounded regardless, <=4 round-1 + <=4 round-2
+        # decisions before either trump is set or a real misdeal terminal is
+        # hit, caught by the is_terminal() check above), and the INSTANT a
+        # child's phase becomes PLAY, that child is cut immediately as a
+        # leaf -- no PLAY recursion happens inside a bidding-rooted solve at
+        # all. PLAY decisions get their own separate SubgameSolver later,
+        # unaffected by any of this.
+        #
+        # This fixes a real structural asymmetry without the blowup a
+        # naive "just don't count bidding plies" version has (measured:
+        # 52.7x slower, since that version kept recursing into real,
+        # ~4-5-way-branching card play for every distinct bidding-resolution
+        # path instead of stopping once). Under the OLD flat ply-count
+        # (still used for a state already inside PLAY, below), OrderUp/Call
+        # collapse straight into DEALER_DISCARD then real card play, so they
+        # reach genuine searched trick outcomes within a few plies, while
+        # Pass hands the decision to the next player -- under a flat shared
+        # budget, Pass's subtree gets cut off deep in still-uncertain
+        # bidding, leaning almost entirely on the value net's guess, while
+        # OrderUp's is backed by real search. That asymmetry lets
+        # regret-matching settle on whichever branch currently has the
+        # more-trustworthy (search-backed) number -- always OrderUp/Call,
+        # independent of whether it's actually better. Making every bidding
+        # leaf the SAME kind of estimate (one value-net call at the moment
+        # trump is fixed, whether reached via an immediate OrderUp or a long
+        # chain of passes) removes that asymmetry at its source, in the
+        # estimator type, not just the sample count.
+        #
+        # DEALER_DISCARD and BID_ROUND_2 are free (cut-at-boundary) ONLY when
+        # reached as an INTERNAL node of a bidding-rooted solve -- there, a
+        # rough single-leaf estimate of "trump fixed, some discard/call
+        # chosen" is enough to judge whether an ANCESTOR decision (e.g.
+        # ordering up, or passing round 1 toward round 2) looks good, and
+        # keeping it cheap is what avoids the blowup above. When either is
+        # itself the solve's ROOT (self_play_hand solving the real decision),
+        # it must NOT be free: both have at least one action (Discard; Call)
+        # that transitions DIRECTLY into Phase.PLAY, so with every such
+        # option immediately cut at the boundary, the tree is just the root
+        # plus same-depth leaves -- no real search at all, so regret-matching
+        # over them degenerates to comparing unbacked value-net guesses
+        # (measured for DEALER_DISCARD: exactly 1 infoset, exactly-uniform
+        # policy regardless of net quality). BID_ROUND_2 has the identical
+        # structural gap for its Call actions specifically -- unlike round
+        # 1's OrderUp, Call skips DEALER_DISCARD entirely
+        # (euchre/game.py's _apply_bid2 calls _begin_play() directly), so a
+        # round-2-rooted solve's own Call-vs-Call-alone comparison was
+        # ALSO just comparing unbacked leaves, letting any value-head bias
+        # between alone/not-alone train directly into the policy uncorrected
+        # -- this is what surfaced as "every alone option outranks its
+        # same-suit non-alone twin" on the quiz. BID_ROUND_1 has no such gap
+        # (neither Pass nor OrderUp's child is ever directly Phase.PLAY --
+        # OrderUp always passes through DEALER_DISCARD first), so it stays
+        # free unconditionally, root or not.
+        is_free = (state.phase == Phase.BID_ROUND_1
+                  or (state.phase in (Phase.BID_ROUND_2, Phase.DEALER_DISCARD)
+                      and self.root_phase != state.phase))
+        if self.depth_limit is not None and is_free:
+            children = []
+            for a in info.actions:
+                child = state.apply(a)
+                if child.phase == Phase.PLAY and not child.is_terminal():
+                    # Just crossed the phase boundary -- an immediate leaf,
+                    # not a ply-counted continuation.
+                    if self.batch_value_fn is not None:
+                        node = _TNode(util=None)
+                        self._pending_leaves.append((node, child))
+                    else:
+                        node = _TNode(util=self._leaf_value(child))
+                    children.append(node)
+                else:
+                    children.append(self._build(child, depth))
+            return _TNode(info=info, player=player, children=children)
+
+        child_depth = depth + 1 if not is_free else depth
+        children = [self._build(state.apply(a), child_depth) for a in info.actions]
         return _TNode(info=info, player=player, children=children)
 
     def _cfr(self, node: _TNode, reach: List[float],

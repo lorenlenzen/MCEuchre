@@ -49,6 +49,7 @@ void SubgameSolver::init_common(const EuchreState& root, int actor, int iteratio
     team0_score_ = root.team0_score;
     team1_score_ = root.team1_score;
     dealer_is_team0_ = team_of(root.dealer) == 0;
+    root_phase_ = root.phase;
     root_key_ = infoset_key(root, actor);
 }
 
@@ -105,8 +106,67 @@ TNode* SubgameSolver::build(const EuchreState& state, int depth) {
     node->info = &info;
     node->player = player;
     node->children.reserve(info.actions.size());
+
+    // Subgame boundary = phase boundary (ported from rebel/subgame.py's
+    // build() -- see its comment for the full rationale). BidRound1/2 nodes
+    // expand FULLY regardless of depth_limit_ -- the auction is short and
+    // bounded on its own (<=4 round-1 + <=4 round-2 decisions before trump
+    // is set or a real misdeal terminal is hit, caught by the is_terminal()
+    // check above) -- and the instant a child's phase becomes Play, that
+    // child is cut immediately as a leaf instead of recursing into real card
+    // play. This fixes the same structural asymmetry the Python side does
+    // (OrderUp/Call reaching search-backed values while Pass fell back on an
+    // unverified net guess) without the blowup a naive "just don't count
+    // bidding plies" version has -- measured on the Python path at ~53x
+    // slower; this version instead measured ~23x FASTER than the pre-fix
+    // flat ply-count on BidRound1-rooted solves.
+    //
+    // DealerDiscard and BidRound2 are free ONLY when reached as an INTERNAL
+    // node of a bidding-rooted solve, NOT when either is the solve's own
+    // root (a real discard or round-2-call decision). Both have at least
+    // one action that transitions DIRECTLY into Phase::Play (Discard;
+    // Call -- unlike round 1's OrderUp, which always passes through
+    // DealerDiscard first, euchre/game.py's _apply_bid2 calls _begin_play()
+    // directly for Call). If either were always free, a root-level solve
+    // over them would be nothing but the root plus its immediate leaves --
+    // no real search at all, so regret-matching over them degenerates to
+    // comparing unbacked value-net guesses. Measured for DealerDiscard:
+    // exactly 1 infoset, exactly-uniform policy regardless of net quality.
+    // BidRound2 had the identical gap for its Call actions specifically --
+    // every alone/not-alone/suit option was an unbacked same-depth leaf,
+    // letting any value-head bias between them train directly into the
+    // policy uncorrected (surfaced as "every alone option outranks its
+    // same-suit non-alone twin" on the quiz). BidRound1 has no such gap
+    // (neither Pass nor OrderUp's child is ever directly Phase::Play), so
+    // it stays free unconditionally, root or not. Falling through to the
+    // ply-counted path below instead restores real card-play lookahead for
+    // root-level decisions over either phase, same as Play.
+    bool is_free = (state.phase == Phase::BidRound1
+                    || ((state.phase == Phase::BidRound2 || state.phase == Phase::DealerDiscard)
+                        && root_phase_ != state.phase));
+    if (depth_limit_ >= 0 && is_free) {
+        for (const auto& a : info.actions) {
+            EuchreState child = state.apply(a);
+            if (child.phase == Phase::Play && !child.is_terminal()) {
+                node_storage_.emplace_back();
+                TNode* leaf = &node_storage_.back();
+                if (batch_value_fn_) {
+                    pending_leaves_.emplace_back(leaf, child);
+                } else {
+                    leaf->util = {0.0, 0.0, 0.0, 0.0};
+                    leaf->has_util = true;
+                }
+                node->children.push_back(leaf);
+            } else {
+                node->children.push_back(build(child, depth));
+            }
+        }
+        return node;
+    }
+
+    int child_depth = is_free ? depth : depth + 1;
     for (const auto& a : info.actions) {
-        node->children.push_back(build(state.apply(a), depth + 1));
+        node->children.push_back(build(state.apply(a), child_depth));
     }
     return node;
 }

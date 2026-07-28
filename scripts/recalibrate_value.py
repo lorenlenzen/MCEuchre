@@ -34,17 +34,20 @@ from euchre.game import Phase, team_of
 from euchre.infoset import observation_tensor
 from rebel.match_equity import MatchEquityModel
 from rebel.networks import PolicyValueNet
-from rebel.pimc import rollout_value
+from rebel.pimc import resolve_dealer_discard, rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
 def build_samples(n, round2_frac, seed, equity_model=None):
     """(obs, value_target) pairs for post-call states -- exactly the kind of
-    leaf `batch_value_fn_from_net` gets asked to score during CFR search.
-    `equity_model` set: targets are match win-probability deltas at a
-    realistic sampled score (unit-consistent with a match-equity-aware live
-    training run); unset (default): raw point differential at a fixed 0-0
-    score, exactly this function's original behavior."""
+    leaf `batch_value_fn_from_net` gets asked to score during CFR search
+    (SubgameSolver's bidding-rooted solves now cut exactly at the phase
+    boundary: a fresh PLAY-entry state, zero cards played -- see
+    rebel/subgame.py's build()). `equity_model` set: targets are match
+    win-probability deltas at a realistic sampled score (unit-consistent
+    with a match-equity-aware live training run); unset (default): raw
+    point differential at a fixed 0-0 score, exactly this function's
+    original behavior."""
     helper = ReBeLTrainer(seed=seed, equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
@@ -63,9 +66,18 @@ def build_samples(n, round2_frac, seed, equity_model=None):
                     if isinstance(a, Call) and not a.alone]
             if not calls:
                 continue  # defensive; should be unreachable
+            # Call (round 2) skips DEALER_DISCARD entirely -- goes straight
+            # to Phase.PLAY (_apply_bid2 calls _begin_play() directly), so
+            # nxt is already the right kind of leaf, no further resolution.
             nxt = state.apply(rng.choice(calls))
         else:
-            nxt = state.apply(OrderUp(alone=False))
+            dd_state = state.apply(OrderUp(alone=False))
+            # OrderUp (round 1) DOES go through DEALER_DISCARD first --
+            # resolve it (best discard for the dealer's team) so nxt ends up
+            # at the same post-discard, fresh-PLAY-entry leaf type the
+            # solver actually uses, not the pre-discard DEALER_DISCARD state
+            # the value net is never queried at.
+            nxt, _ = resolve_dealer_discard(dd_state)
 
         # exact -- all 4 hands already known; nxt carries whatever score
         # _fresh_deal sampled (apply()/clone() preserve it).
