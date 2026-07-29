@@ -49,12 +49,35 @@ def legal_mask(state: EuchreState) -> np.ndarray:
     return mask
 
 
-def batch_value_fn_from_net(net: PolicyValueNet):
+def batch_value_fn_from_net(net: PolicyValueNet,
+                            perspective: Optional[int] = None):
     """A batched leaf-value function for a net: many states -> one forward pass,
     each returning the team0 - team1 point-differential estimate. Used to plug a
-    trained net into the CFR subgame solver at play time."""
+    trained net into the CFR subgame solver at play time.
+
+    `perspective` picks WHOSE information set the leaf is estimated from, and
+    it matters far more than it looks. Left None (the historical behavior,
+    kept byte-identical for CFRSearchAgent / rebel/range_cfr.py / existing
+    tests) every leaf is scored from `s.current_player` -- the player about
+    to act there, e.g. the opening leader at a post-call bidding leaf. That
+    view does NOT contain the searching actor's hand, so the estimate
+    marginalizes over the actor's own cards -- the one thing the actor knows
+    perfectly. Diagnosed this session as the reason bidding search was
+    confidently wrong: measured across the dealer's six discards the leaf
+    value moved by exactly 0.000, and per-world it varied with sd 0.02-0.08
+    against a true sd of 0.10-0.17 (correlation 0.11-0.70, one negative), so
+    the leaf carried almost no world-specific signal. Alone suffered most,
+    its value depending far more on the maker's exact holding: CFR overvalued
+    the alone branch by +0.13..+0.22 equity while not-alone sat within
+    +/-0.06.
+
+    Set to a seat index (what ReBeLTrainer._value_fn_for does, binding the
+    solve's own actor) the leaf becomes E[V | that player's info], which is
+    the quantity CFR's root actually needs.
+    """
     def fn(states: List[EuchreState]) -> List[float]:
-        players = [s.current_player if not s.is_terminal() else 0
+        players = [(s.current_player if perspective is None else perspective)
+                   if not s.is_terminal() else 0
                    for s in states]
         obs = np.stack([observation_tensor(s, p)
                         for s, p in zip(states, players)])
@@ -108,14 +131,17 @@ def cpp_legal_mask(state) -> np.ndarray:
     return mask
 
 
-def cpp_batch_value_fn_from_net(net):
+def cpp_batch_value_fn_from_net(net, perspective: Optional[int] = None):
     """Same as batch_value_fn_from_net, but for mceuchre_cpp.EuchreState
     leaves -- team_of is player % 2 (engine.h), matching euchre.game.team_of
-    exactly, so no cpp call is needed for it here."""
+    exactly, so no cpp call is needed for it here. `perspective` has the same
+    meaning and the same default-None behavior; see batch_value_fn_from_net's
+    docstring for why it matters."""
     cpp = _cpp_module()
 
     def fn(states) -> List[float]:
-        players = [s.current_player if not s.is_terminal() else 0
+        players = [(s.current_player if perspective is None else perspective)
+                   if not s.is_terminal() else 0
                    for s in states]
         obs = np.stack([np.asarray(cpp.observation_tensor(s, p))
                         for s, p in zip(states, players)])
@@ -219,6 +245,9 @@ class ReBeLTrainer:
                  grad_clip_norm: float = 5.0,
                  round2_seed_frac: float = 0.0,
                  value_ground_frac: float = 0.0,
+                 bid_exact_frac: float = 0.0,
+                 bid2_exact_frac: float = 0.0,
+                 bid_exact_worlds: Optional[int] = None,
                  equity_model: Optional["MatchEquityModel"] = None,
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
@@ -286,6 +315,36 @@ class ReBeLTrainer:
         # good for correcting gross miscalibration, not for fine policy
         # tuning. Off by default.
         self.value_ground_frac = value_ground_frac
+        # Exact-leaf bidding solves: the full_depth_cards idea ("solve to
+        # ground truth where it's affordable") applied to the bidding phase,
+        # and the ONLY thing in this pipeline that ever supervises bidding
+        # *policy* against ground truth -- value_ground_frac's samples are
+        # value-only (supervise_policy=False). Measured this session on the
+        # bid1 quiz: net-leaf search 3/9, exact-leaf search 6/9, flipping
+        # every over-aggressive call (three spurious OrderUps, four spurious
+        # alones).
+        #
+        # Kept a modest anchor rather than the default path because the
+        # oracle is biased: double-dummy gives the defense perfect
+        # information, which real defenders lack, so it systematically
+        # favors defending. The same measurement that fixed seven
+        # over-aggressive cases introduced three over-passive ones. A
+        # PIMC-style oracle sampling defenders' hands from beliefs would
+        # remove that bias; until then this fraction trades one error
+        # direction against the other.
+        self.bid_exact_frac = bid_exact_frac
+        # Round 2 is off by default and behind its own knob purely on cost: a
+        # bid2-rooted solve is ~2000 leaves/world against a bid1-rooted
+        # solve's ~48 (measured), since BID_ROUND_2 isn't free at its own
+        # root and expands real depth. A bid1 solve already contains the
+        # whole round-2 auction as internal nodes, so bid_exact_frac alone
+        # still grounds round-2 reasoning -- just not round-2-rooted
+        # decisions as they arise in live play.
+        self.bid2_exact_frac = bid2_exact_frac
+        # Exact solves may use fewer worlds than net solves, since each leaf
+        # costs a double-dummy solve rather than a slice of one batched
+        # forward pass. None reuses num_worlds.
+        self.bid_exact_worlds = bid_exact_worlds
         # None (default) preserves exact prior behavior throughout this
         # class: every deal starts 0-0, SubgameSolver gets no equity_model
         # (raw point-differential CFR targets, unchanged), and
@@ -402,10 +461,96 @@ class ReBeLTrainer:
 
     def batch_value_fn(self, states) -> List[float]:
         """Value many leaves in a single network forward pass (see
-        ``batch_value_fn_from_net`` / ``cpp_batch_value_fn_from_net``)."""
+        ``batch_value_fn_from_net`` / ``cpp_batch_value_fn_from_net``), each
+        from its own acting player's view. Kept for callers that want the
+        historical leaf-player perspective; self-play uses ``_value_fn_for``
+        instead."""
         if self.engine == "cpp":
             return cpp_batch_value_fn_from_net(self.net)(states)
         return batch_value_fn_from_net(self.net)(states)
+
+    def _value_fn_for(self, actor: int):
+        """Leaf-value function bound to one solve's own actor.
+
+        The perspective is constant for a whole solve, so binding it into the
+        closure handed to SubgameSolver at construction is all this takes --
+        no change to the BatchValueFn contract and, notably, no C++ change at
+        all, since the cpp solver receives this same Python callable.
+
+        Why the actor and not the leaf's own acting player: see
+        batch_value_fn_from_net's docstring. Scoring a bidding leaf from the
+        opening leader's view averages away the actor's own hand, which is
+        precisely the information the bid decision turns on."""
+        if self.engine == "cpp":
+            return cpp_batch_value_fn_from_net(self.net, perspective=actor)
+        return batch_value_fn_from_net(self.net, perspective=actor)
+
+    def _use_exact_leaves(self, state) -> bool:
+        """Should THIS solve value every leaf by exact double-dummy?"""
+        if self.engine == "cpp":
+            r1 = state.phase == self._cpp.Phase.BidRound1
+            r2 = state.phase == self._cpp.Phase.BidRound2
+        else:
+            r1 = state.phase == Phase.BID_ROUND_1
+            r2 = state.phase == Phase.BID_ROUND_2
+        frac = (self.bid_exact_frac if r1 else
+                self.bid2_exact_frac if r2 else 0.0)
+        return frac > 0 and self.rng.random() < frac
+
+    def _exact_leaf_fn(self):
+        """Leaf-value function that solves each leaf exactly (double-dummy)
+        instead of asking the net.
+
+        Applied all-or-nothing per solve, never per leaf. Mixing exact and
+        net leaves inside one tree would recreate precisely the estimator
+        asymmetry the phase-boundary fix was built to remove (see the long
+        comment in rebel/subgame.py's _build): regret-matching happily
+        settles on whichever branch carries the more trustworthy number,
+        independent of whether that branch is actually better, so every leaf
+        in a tree has to be the same KIND of estimate.
+
+        One memo dict is shared across the whole solve, so the transposition
+        table survives between leaves rather than being rebuilt per call.
+        """
+        memo: dict = {}
+        if self.engine == "cpp":
+            cpp = self._cpp
+            eqm = self._cpp_equity_model
+
+            def fn(states) -> List[float]:
+                out = []
+                for s in states:
+                    if s.is_terminal():
+                        r = s.returns()
+                        out.append(
+                            eqm.equity_delta(s.team0_score, s.team1_score,
+                                             _cpp_team_of(s.dealer) == 0,
+                                             r[0], r[1])
+                            if eqm is not None else float(r[0] - r[1]))
+                    else:
+                        out.append(cpp_rollout_value(
+                            s, team0_score=s.team0_score,
+                            team1_score=s.team1_score, equity_model=eqm))
+                return out
+            return fn
+
+        def fn(states) -> List[float]:
+            out = []
+            for s in states:
+                if s.is_terminal():
+                    r = s.returns()
+                    out.append(
+                        self.equity_model.equity_delta(
+                            s.team0_score, s.team1_score,
+                            team_of(s.dealer) == 0, r[0], r[1])
+                        if self.equity_model is not None else float(r[0] - r[1]))
+                else:
+                    out.append(rollout_value(
+                        s, memo, team0_score=s.team0_score,
+                        team1_score=s.team1_score,
+                        equity_model=self.equity_model))
+            return out
+        return fn
 
     # -- self-play -----------------------------------------------------------
 
@@ -567,6 +712,24 @@ class ReBeLTrainer:
     # mimicking how often either occurs in real play.
     _VALUE_GROUND_ALONE_FRAC = 0.5
 
+    @staticmethod
+    def _ground_key(pre_key, alone: bool):
+        """Cluster key for a grounding sample: the pre-call hand-strength
+        bucket, tagged "_ground", plus which of alone / not-alone this sample
+        actually took.
+
+        The alone tag only belongs here, not on _cluster_key's real CFR
+        decision samples -- at a bid decision the actor hasn't chosen alone
+        yet, so there is nothing to tag. A grounding sample, by contrast, IS
+        one concrete post-call leaf with a definite alone value, and keeping
+        the two apart is what lets scripts/targeted_value_ground.py weight
+        them separately. Pooled (the previous behavior) a bad alone
+        calibration and a good not-alone one in the same strength bucket
+        averaged into one middling MSE, so the per-cluster weighting was
+        structurally blind to the exact axis this session found failing."""
+        return ((pre_key[0] + "_ground",) + tuple(pre_key[1:])
+                + ("alone" if alone else "not_alone",))
+
     def _grounded_value_sample(self) -> Optional[Sample]:
         """One exact rollout_value-grounded sample, built the same way
         recalibrate_value.py's build_samples() does -- a real deal, a real
@@ -586,6 +749,16 @@ class ReBeLTrainer:
         because its sibling got pulled down and it didn't -- diagnosed this
         session from exactly that sequence (over-calling fixed, then alone
         calls started dominating).
+
+        The observation is captured from the BIDDER's seat, not the leaf's
+        own acting player (the opening leader). That matches how the search
+        now queries leaves -- see _value_fn_for and batch_value_fn_from_net
+        -- and it is the whole point: scored from the leader's view, the
+        estimate marginalizes over the bidder's own hand, so grounding was
+        training the value head to be an accurate estimator of the wrong
+        quantity. Calibration looked excellent while bidding kept failing,
+        because "what is this position worth to whoever leads" is simply not
+        the number a bid decision needs.
 
         The captured leaf is always a *post-discard* state (trump fixed,
         zero cards played) -- for round 2's Call that's automatic (it skips
@@ -626,14 +799,20 @@ class ReBeLTrainer:
                         if a.kind == cpp.ActionKind.Call and a.alone == want_alone]
                 if not calls:
                     return None
-                pre_key = self._cluster_key(state, state.current_player)
+                actor = state.current_player
+                pre_key = self._cluster_key(state, actor)
                 # Call (round 2) skips DEALER_DISCARD entirely -- goes
                 # straight to Phase.Play (euchre/game.py's _apply_bid2 calls
                 # _begin_play() directly), so nxt is already the right kind
                 # of leaf and needs no further resolution.
                 nxt = state.apply(self.rng.choice(calls))
             else:
-                pre_key = self._cluster_key(state, state.current_player)
+                for _ in range(self.rng.randint(0, 3)):
+                    state = state.apply(cpp.Action.pass_())
+                if state.phase != cpp.Phase.BidRound1:
+                    return None  # defensive; 0-3 passes never leaves round 1
+                actor = state.current_player
+                pre_key = self._cluster_key(state, actor)
                 want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
                 dd_state = state.apply(cpp.Action.order_up(want_alone))
                 # OrderUp (round 1) DOES go through DealerDiscard first --
@@ -644,15 +823,14 @@ class ReBeLTrainer:
                 # pre-discard DealerDiscard state the value net is never
                 # queried at anymore.
                 nxt, _ = cpp_resolve_dealer_discard(dd_state)
-            ground_key = (pre_key[0] + "_ground",) + pre_key[1:]
+            ground_key = self._ground_key(pre_key, want_alone)
 
             v0 = cpp_rollout_value(nxt, team0_score=nxt.team0_score,
                                    team1_score=nxt.team1_score,
                                    equity_model=self._cpp_equity_model)
-            leaf_player = nxt.current_player
-            target = v0 if leaf_player % 2 == 0 else -v0
+            target = v0 if actor % 2 == 0 else -v0
             return Sample(
-                obs=np.asarray(cpp.observation_tensor(nxt, leaf_player)),
+                obs=np.asarray(cpp.observation_tensor(nxt, actor)),
                 mask=cpp_legal_mask(nxt),
                 policy=np.zeros(NUM_ACTIONS, dtype=np.float32),  # unused,
                                                                   # see supervise_policy
@@ -670,13 +848,27 @@ class ReBeLTrainer:
                      if isinstance(a, Call) and a.alone == want_alone]
             if not calls:
                 return None
-            pre_key = self._cluster_key(state, state.current_player)
+            actor = state.current_player
+            pre_key = self._cluster_key(state, actor)
             # Call (round 2) skips DEALER_DISCARD entirely -- goes straight
             # to Phase.PLAY (_apply_bid2 calls _begin_play() directly), so
             # nxt is already the right kind of leaf, no further resolution.
             nxt = state.apply(self.rng.choice(calls))
         else:
-            pre_key = self._cluster_key(state, state.current_player)
+            # Vary WHICH seat orders up. Bidding opens left of the dealer,
+            # who is also the opening leader after a call -- so ordering up
+            # straight off the deal would only ever ground the single seat
+            # where bidder and leader coincide, i.e. precisely the case where
+            # the actor's view and the leaf player's view are identical and
+            # the perspective above makes no difference. Measured: without
+            # this, actor- and leaf-perspective grounding produced
+            # byte-identical samples 200/200 times.
+            for _ in range(self.rng.randint(0, 3)):
+                state = state.apply(Pass())
+            if state.phase != Phase.BID_ROUND_1:
+                return None  # defensive; 0-3 passes never leaves round 1
+            actor = state.current_player
+            pre_key = self._cluster_key(state, actor)
             want_alone = self.rng.random() < self._VALUE_GROUND_ALONE_FRAC
             dd_state = state.apply(OrderUp(alone=want_alone))
             # OrderUp (round 1) DOES go through DEALER_DISCARD first --
@@ -687,7 +879,7 @@ class ReBeLTrainer:
             # DEALER_DISCARD state the value net is never queried at
             # anymore.
             nxt, _ = resolve_dealer_discard(dd_state)
-        ground_key = (pre_key[0] + "_ground",) + pre_key[1:]
+        ground_key = self._ground_key(pre_key, want_alone)
 
         # exact -- all 4 hands already known; nxt already carries whatever
         # score _fresh_deal sampled (apply()/clone() preserve it), so no
@@ -695,10 +887,9 @@ class ReBeLTrainer:
         v0 = rollout_value(nxt, team0_score=nxt.team0_score,
                            team1_score=nxt.team1_score,
                            equity_model=self.equity_model)
-        leaf_player = nxt.current_player
-        target = v0 if team_of(leaf_player) == 0 else -v0
+        target = v0 if team_of(actor) == 0 else -v0
         return Sample(
-            obs=observation_tensor(nxt, leaf_player),
+            obs=observation_tensor(nxt, actor),
             mask=legal_mask(nxt),
             policy=np.zeros(NUM_ACTIONS, dtype=np.float32),  # unused, see
                                                               # supervise_policy
@@ -721,17 +912,25 @@ class ReBeLTrainer:
                 state = state.apply(legal[0])
                 continue
             actor = state.current_player
+            # Exact-leaf bidding solve, or the ordinary net-leaf one? Decided
+            # ONCE per solve and applied to every leaf in it -- see
+            # _exact_leaf_fn for why this must never be mixed within a tree.
+            exact = self._use_exact_leaves(state)
+            leaf_fn = (self._exact_leaf_fn() if exact
+                       else self._value_fn_for(actor))
+            worlds = (self.bid_exact_worlds if exact and self.bid_exact_worlds
+                      else self.num_worlds)
             if self.engine == "cpp":
                 depth = self._depth_for(state)
                 solver = self._cpp.SubgameSolver(
-                    state, actor, self.num_worlds, self.cfr_iterations,
-                    -1 if depth is None else depth, self.batch_value_fn,
+                    state, actor, worlds, self.cfr_iterations,
+                    -1 if depth is None else depth, leaf_fn,
                     self._cpp_equity_model, self.rng.getrandbits(63))
             else:
                 solver = SubgameSolver(
-                    state, actor, num_worlds=self.num_worlds,
+                    state, actor, num_worlds=worlds,
                     iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
-                    batch_value_fn=self.batch_value_fn,
+                    batch_value_fn=leaf_fn,
                     belief_model=self.belief_model, equity_model=self.equity_model,
                     rng=self.rng)
             solver.run()
@@ -753,12 +952,19 @@ class ReBeLTrainer:
                 obs = observation_tensor(state, actor)
                 mask = legal_mask(state)
             actor_val = root_val if team_of(actor) == 0 else -root_val
+            ckey = self._cluster_key(state, actor)
+            if exact:
+                # Kept as its own cluster so exact-leaf targets stay visible
+                # in cluster_stats() and don't get pooled with net-leaf ones
+                # by prioritized replay -- they're a different (and much
+                # better) kind of estimate for the same position.
+                ckey = ckey + ("exact",)
             self._store(Sample(
                 obs=obs,
                 mask=mask,
                 policy=target,
                 value=actor_val,
-                cluster_key=self._cluster_key(state, actor)))
+                cluster_key=ckey))
 
             actions = list(policy)
             chosen = self.rng.choices(

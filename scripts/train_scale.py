@@ -56,6 +56,26 @@ def main() -> None:
                          "re-drifting the way it was found to have "
                          "(overestimating post-call outcomes by roughly "
                          "half a point to a full point) this session.")
+    ap.add_argument("--bid-exact-frac", type=float, default=0.0,
+                    help="fraction of round-1 bidding decisions solved with "
+                         "every leaf valued by exact double-dummy instead of "
+                         "the value net (all-or-nothing per solve). Unlike "
+                         "--value-ground-frac these supervise the bid POLICY "
+                         "head against ground truth. Keep modest (~0.05): "
+                         "double-dummy gives the defense perfect information "
+                         "and so leans conservative.")
+    ap.add_argument("--bid2-exact-frac", type=float, default=0.0,
+                    help="same for round-2-rooted decisions; separate knob "
+                         "because a bid2 solve is ~2000 leaves/world against "
+                         "bid1's ~48.")
+    ap.add_argument("--bid-exact-worlds", type=int, default=None,
+                    help="belief worlds for exact-leaf solves only (defaults "
+                         "to --num-worlds).")
+    ap.add_argument("--fresh-optimizer", action="store_true",
+                    help="ignore the resumed checkpoint's sibling .opt.pt and "
+                         "start Adam from zero. Worth it after a change to "
+                         "WHAT the value head predicts -- see "
+                         "train_parallel.py's flag for the rationale.")
     ap.add_argument("--match-equity-table", type=str,
                     default="rebel/match_equity_table.json",
                     help="path to the precomputed match-equity table (see "
@@ -113,6 +133,9 @@ def main() -> None:
         grad_clip_norm=args.grad_clip_norm,
         round2_seed_frac=args.round2_seed_frac,
         value_ground_frac=args.value_ground_frac,
+        bid_exact_frac=args.bid_exact_frac,
+        bid2_exact_frac=args.bid2_exact_frac,
+        bid_exact_worlds=args.bid_exact_worlds,
         belief_model=belief_model, engine=args.engine, lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
@@ -125,7 +148,9 @@ def main() -> None:
         # sidecar (older checkpoints) just means starting Adam fresh, same
         # as before this existed.
         opt_path = os.path.splitext(args.resume)[0] + ".opt.pt"
-        if os.path.exists(opt_path):
+        if args.fresh_optimizer:
+            print(f"ignoring optimizer state at {opt_path} (--fresh-optimizer)")
+        elif os.path.exists(opt_path):
             trainer.opt.load_state_dict(torch.load(opt_path))
             print(f"resumed optimizer state from {opt_path}")
         else:

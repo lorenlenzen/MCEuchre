@@ -65,6 +65,57 @@ steady trickle of the same kind of grounded sample into every live training
 batch, so the value head's calibration doesn't silently drift back the way it
 did before — the original failure this whole investigation traced back to.
 
+## Actor-conditioned leaf values, and `--bid-exact-frac`
+
+Diagnosed after a ~60,000-hand plateau: the bidding **search** was scoring
+*worse* than the policy head it trains (5/15 vs 7/15 on the buildable bid quiz
+questions), and confidently so — 0.98–1.00 on its errors. The head was
+faithfully learning a broken search, so more hands actively made it worse.
+
+Root cause was the leaf value's *perspective*, not depth. `SubgameSolver`
+expands the auction fully and cuts the instant a child enters `PLAY`, so
+`--depth-limit`/`--full-depth-cards` do not apply to bidding at all — every
+bid leaf is one value-net call. Those calls used `observation_tensor(s,
+s.current_player)`: the opening **leader's** infoset, which does not contain
+the bidder's hand. The estimate therefore averaged away the actor's own cards,
+the information a bid decision turns on. Measured: leaf value moved by exactly
+`0.000` across the dealer's six discards, and varied per world with sd
+0.02–0.08 against a true sd of 0.10–0.17 (correlation 0.11–0.70, one
+*negative*). Alone suffered most — its value depends far more on the maker's
+exact holding — so CFR overvalued alone by +0.13…+0.22 equity while not-alone
+stayed within ±0.06.
+
+Leaves are now scored from the **searching actor's** seat
+(`ReBeLTrainer._value_fn_for`). Grounding captures the bidder's observation to
+match, and it now varies which seat bids: bidding opens left of the dealer,
+who is *also* the opening leader, so the old code only ever grounded the one
+seat where the two coincide — 200/200 byte-identical samples between the two
+perspectives before this. On the pre-existing checkpoint this alone takes
+net-leaf bid1 search from 3/9 to 6/9 and removes every spurious alone, though
+that net was trained on the old perspective, so the honest test is after a
+re-ground.
+
+`--bid-exact-frac` solves a fraction of round-1 bid decisions with **every**
+leaf valued by exact double-dummy — all-or-nothing per solve, never mixed
+inside one tree (mixing would recreate the estimator asymmetry the
+phase-boundary fix removed). Unlike `--value-ground-frac`, which is value-only,
+these supervise the bid **policy** head against ground truth — the only thing
+in the pipeline that does. Cost at production settings: `1.0` with
+`--bid-exact-worlds 4` is 2.3x baseline, so `0.05` is ≈1.06x.
+
+Keep it modest. Double-dummy hands the defense perfect information, so it
+leans conservative: exact leaves fixed all seven over-aggressive quiz cases
+but introduced three over-passive ones. `--bid2-exact-frac` is separate and
+off by default purely on cost (a bid2 solve is ~2000 leaves/world against
+bid1's ~48); a bid1 solve already contains the whole round-2 auction
+internally, so `--bid-exact-frac` alone still grounds round-2 reasoning.
+
+`scripts/bid_search_diagnostic.py` is the tool for all of this — `--mode
+compare` (head vs net-leaf vs exact-leaf search), `--mode gaps` (per-action
+CFR value against exact truth), `--mode leaves` (per-world leaf
+discrimination). Use it rather than the quiz alone, which reads the policy
+head only and so cannot tell a bad search from a badly-learned one.
+
 ---
 
 ## Below: pre-redesign notes (kept for reference)

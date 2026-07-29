@@ -435,3 +435,132 @@ def test_cpp_net_trains_via_rebel_trainer_and_checkpoint_interops():
         py_logits, py_value = py_net(obs)
     assert torch.equal(cpp_logits, py_logits)
     assert torch.equal(cpp_value, py_value)
+
+
+# -- actor-conditioned leaf values (A) ---------------------------------------
+
+def test_leaf_value_perspective_defaults_to_the_leaf_player():
+    """Back-compat: perspective=None must keep scoring each leaf from its own
+    acting player, byte-for-byte, for CFRSearchAgent / range_cfr / old tests."""
+    from euchre.actions import OrderUp
+    from rebel.pimc import resolve_dealer_discard
+    from rebel.train_rebel import batch_value_fn_from_net
+    net = PolicyValueNet()
+    st = ReBeLTrainer(seed=0)._fresh_deal()
+    nxt, _ = resolve_dealer_discard(st.apply(OrderUp(alone=False)))
+    leader = nxt.current_player
+    assert (batch_value_fn_from_net(net)([nxt])[0]
+            == pytest.approx(batch_value_fn_from_net(
+                net, perspective=leader)([nxt])[0]))
+
+
+def test_leaf_value_uses_the_requested_perspective():
+    """The fix this targets: a bidding leaf scored from the opening leader's
+    infoset averages away the searching actor's own hand, which is exactly
+    the information the bid decision turns on."""
+    from euchre.actions import OrderUp
+    from euchre.game import team_of
+    from euchre.infoset import observation_tensor
+    from rebel.pimc import resolve_dealer_discard
+    from rebel.train_rebel import batch_value_fn_from_net
+    net = PolicyValueNet()
+    st = ReBeLTrainer(seed=0)._fresh_deal()
+    nxt, _ = resolve_dealer_discard(st.apply(OrderUp(alone=False)))
+    other = (nxt.current_player + 1) % 4
+
+    got = batch_value_fn_from_net(net, perspective=other)([nxt])[0]
+    with torch.no_grad():
+        _, v = net(torch.from_numpy(observation_tensor(nxt, other)).unsqueeze(0))
+    want = float(v[0]) if team_of(other) == 0 else -float(v[0])
+    assert got == pytest.approx(want, abs=1e-6)
+    # and the two views are genuinely different numbers, not a no-op
+    assert got != pytest.approx(batch_value_fn_from_net(net)([nxt])[0])
+
+
+def test_value_fn_for_binds_the_actor_perspective():
+    from euchre.actions import OrderUp
+    from rebel.pimc import resolve_dealer_discard
+    from rebel.train_rebel import batch_value_fn_from_net
+    tr = ReBeLTrainer(seed=0)
+    st = tr._fresh_deal()
+    nxt, _ = resolve_dealer_discard(st.apply(OrderUp(alone=False)))
+    other = (nxt.current_player + 1) % 4
+    assert (tr._value_fn_for(other)([nxt])[0]
+            == pytest.approx(batch_value_fn_from_net(
+                tr.net, perspective=other)([nxt])[0]))
+
+
+def test_grounding_samples_all_four_bidding_seats():
+    """Bidding opens left of the dealer, who is ALSO the opening leader, so
+    grounding used to only ever cover the one seat where the two coincide --
+    precisely the case where the perspective above makes no difference
+    (measured: 200/200 byte-identical samples before this)."""
+    tr = ReBeLTrainer(value_ground_frac=1.0, seed=11)
+    seats = set()
+    for _ in range(200):
+        st = tr._fresh_deal()
+        for _ in range(tr.rng.randint(0, 3)):
+            from euchre.actions import Pass
+            st = st.apply(Pass())
+        seats.add((st.current_player - st.dealer) % 4)
+    assert seats == {1, 2, 3, 0}, seats
+
+
+def test_ground_key_separates_alone_from_not_alone():
+    tr = ReBeLTrainer(value_ground_frac=1.0, seed=3)
+    keys = {tr._grounded_value_sample().cluster_key for _ in range(200)}
+    assert any(k[-1] == "alone" for k in keys)
+    assert any(k[-1] == "not_alone" for k in keys)
+    # the strength bucket survives alongside the new alone tag
+    assert all(k[0].endswith("_ground") for k in keys)
+
+
+# -- exact-leaf bidding solves (B) -------------------------------------------
+
+def test_exact_leaf_bid_solve_ignores_the_value_net_entirely():
+    """All-or-nothing invariant: if even one leaf still came from the net,
+    two different random nets would produce different bid policies. Mixing
+    exact and net leaves inside one tree would recreate the estimator
+    asymmetry the phase-boundary fix removed."""
+    from rebel.subgame import SubgameSolver
+    policies = []
+    for net_seed in (0, 1):
+        torch.manual_seed(net_seed)
+        tr = ReBeLTrainer(net=PolicyValueNet(), bid_exact_frac=1.0, seed=4)
+        st = tr._fresh_deal()
+        solver = SubgameSolver(st, st.current_player, num_worlds=2,
+                               iterations=10, depth_limit=6,
+                               batch_value_fn=tr._exact_leaf_fn(),
+                               rng=random.Random(0))
+        solver.run()
+        policies.append(solver.root_policy())
+    assert policies[0].keys() == policies[1].keys()
+    for a in policies[0]:
+        assert policies[0][a] == pytest.approx(policies[1][a])
+    # and it actually decided something rather than sitting at uniform
+    assert max(policies[0].values()) > 1.0 / len(policies[0]) + 1e-6
+
+
+def test_use_exact_leaves_respects_phase_and_fraction():
+    tr = ReBeLTrainer(bid_exact_frac=1.0, bid2_exact_frac=0.0, seed=0)
+    st = tr._fresh_deal()
+    assert tr._use_exact_leaves(st)                 # bid1, frac 1.0
+    off = ReBeLTrainer(bid_exact_frac=0.0, seed=0)
+    assert not off._use_exact_leaves(st)            # default: never
+    # a PLAY state is never exact-solved regardless of the bidding fractions
+    from euchre.actions import OrderUp
+    from rebel.pimc import resolve_dealer_discard
+    play, _ = resolve_dealer_discard(st.apply(OrderUp(alone=False)))
+    assert not tr._use_exact_leaves(play)
+
+
+def test_exact_leaf_bid_solve_tags_its_samples():
+    tr = ReBeLTrainer(num_worlds=2, cfr_iterations=10, depth_limit=6,
+                      bid_exact_frac=1.0, bid_exact_worlds=2, seed=1)
+    tr.self_play_hand()
+    bid = [s for s in tr.buffer if s.cluster_key[0] in ("bid1", "bid2")]
+    assert bid, "expected at least one bidding sample"
+    assert all(s.cluster_key[-1] == "exact" for s in bid), \
+        [s.cluster_key for s in bid]
+    # exact-leaf samples DO supervise the policy head -- that's their point
+    assert all(s.supervise_policy for s in bid)

@@ -346,18 +346,31 @@ class CFRSearchAgent:
     Uses full-depth CFR over a sampled belief. This is the decision-time search
     agent; with a trained value net passed as ``value_fn`` and a ``depth_limit``
     it becomes the depth-limited ReBeL player.
+
+    Prefer ``batch_value_fn_factory`` over ``batch_value_fn`` when plugging in
+    a trained net: pass ``ReBeLTrainer._value_fn_for`` (or anything with that
+    ``actor -> BatchValueFn`` shape) and each solve scores its leaves from the
+    acting player's own information set, matching how training now generates
+    targets. A plain ``batch_value_fn`` scores every leaf from whoever happens
+    to act *at that leaf*, which for a bidding-rooted solve is the opening
+    leader -- a view that omits the searching player's own hand (see
+    rebel/train_rebel.py's batch_value_fn_from_net docstring for the
+    measurements). It stays supported and is still the default so existing
+    callers are unaffected.
     """
 
     def __init__(self, num_worlds: int = 16, iterations: int = 30,
                  depth_limit: Optional[int] = None,
                  value_fn: Optional[ValueFn] = None,
                  batch_value_fn: Optional[BatchValueFn] = None,
+                 batch_value_fn_factory=None,
                  belief_model=None, greedy: bool = True, seed: int = 0) -> None:
         self.num_worlds = num_worlds
         self.iterations = iterations
         self.depth_limit = depth_limit
         self.value_fn = value_fn
         self.batch_value_fn = batch_value_fn
+        self.batch_value_fn_factory = batch_value_fn_factory
         self.belief_model = belief_model
         self.greedy = greedy
         self._rng = random.Random(seed)
@@ -366,10 +379,14 @@ class CFRSearchAgent:
         legal = state.legal_actions()
         if len(legal) == 1:
             return legal[0]
+        actor = state.current_player
+        bvf = (self.batch_value_fn_factory(actor)
+               if self.batch_value_fn_factory is not None
+               else self.batch_value_fn)
         solver = SubgameSolver(
-            state, state.current_player, num_worlds=self.num_worlds,
+            state, actor, num_worlds=self.num_worlds,
             iterations=self.iterations, depth_limit=self.depth_limit,
-            value_fn=self.value_fn, batch_value_fn=self.batch_value_fn,
+            value_fn=self.value_fn, batch_value_fn=bvf,
             belief_model=self.belief_model, rng=self._rng)
         solver.run()
         policy = solver.root_policy()

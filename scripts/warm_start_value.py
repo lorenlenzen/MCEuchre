@@ -110,24 +110,46 @@ def _land_post_call(helper: "ReBeLTrainer", rng: random.Random, round2_frac: flo
                 continue
             if not calls:
                 return None  # defensive; unreachable given the checks above
-            return state.apply(rng.choice(calls))
+            actor = state.current_player
+            return state.apply(rng.choice(calls)), actor
         return None  # defensive; round 2 always resolves within 4 turns
+    # Vary WHICH seat orders up: bidding opens left of the dealer, who is also
+    # the opening leader after a call, so ordering up straight off the deal
+    # only ever grounds the one seat where bidder and leader coincide -- the
+    # case where leaf_perspective makes no difference. (The round-2 branch
+    # above already varies the caller via its per-turn walk.)
+    for _ in range(rng.randint(0, 3)):
+        state = state.apply(Pass())
+    if state.phase != Phase.BID_ROUND_1:
+        return None  # defensive; 0-3 passes never leaves round 1
+    actor = state.current_player
     want_alone = rng.random() < alone_frac
     dd_state = state.apply(OrderUp(alone=want_alone))
     nxt, _ = resolve_dealer_discard(dd_state)
-    return nxt
+    return nxt, actor
 
 
 def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
-                  stick_the_dealer=False, equity_model=None, alone_frac=0.5):
+                  stick_the_dealer=False, equity_model=None, alone_frac=0.5,
+                  leaf_perspective="actor"):
+    """`leaf_perspective`: "actor" (default) takes the observation from the
+    BIDDER's seat, matching how the CFR search now queries leaves (see
+    ReBeLTrainer._value_fn_for); "leaf" is the historical acting-player view.
+    For --deep-frac samples the bidder is no longer the one to act, which is
+    exactly the point -- that is the "someone else's turn" region the value
+    head never saw under the old scheme and now gets asked about constantly."""
+    if leaf_perspective not in ("actor", "leaf"):
+        raise ValueError("leaf_perspective must be 'actor' or 'leaf', "
+                         f"got {leaf_perspective!r}")
     helper = ReBeLTrainer(seed=seed, stick_the_dealer=stick_the_dealer,
                           equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
     while len(out) < n:
-        nxt = _land_post_call(helper, rng, round2_frac, alone_frac)
-        if nxt is None:
+        landed = _land_post_call(helper, rng, round2_frac, alone_frac)
+        if landed is None:
             continue
+        nxt, actor = landed
         if rng.random() < deep_frac:
             plies = rng.randint(1, max_deep_plies)
             for _ in range(plies):
@@ -142,9 +164,9 @@ def build_samples(n, round2_frac, deep_frac, max_deep_plies, seed,
         v0 = rollout_value(nxt, team0_score=nxt.team0_score,
                            team1_score=nxt.team1_score,
                            equity_model=equity_model)
-        leaf_player = nxt.current_player
-        target = v0 if team_of(leaf_player) == 0 else -v0
-        obs = observation_tensor(nxt, leaf_player)
+        p = actor if leaf_perspective == "actor" else nxt.current_player
+        target = v0 if team_of(p) == 0 else -v0
+        obs = observation_tensor(nxt, p)
         out.append((obs, target))
         if len(out) % 500 == 0:
             print(f"  ...{len(out)}/{n} samples", flush=True)
@@ -175,6 +197,13 @@ def main():
                          "alone, sampled independently of --round2-frac -- "
                          "see _land_post_call()'s docstring for why this "
                          "can't stay hardcoded to not-alone.")
+    ap.add_argument("--leaf-perspective", choices=["actor", "leaf"],
+                    default="actor",
+                    help="whose infoset the leaf observation comes from. "
+                         "'actor' (default) is the bidder, matching how the "
+                         "CFR search queries leaves; 'leaf' is the old "
+                         "acting-player view -- kept only to reproduce "
+                         "pre-fix checkpoints.")
     ap.add_argument("--deep-frac", type=float, default=0.5,
                     help="fraction of samples that keep playing random legal "
                          "actions forward past the post-call leaf before "
@@ -230,11 +259,13 @@ def main():
     print(f"generating {args.samples} value-grounding samples "
           f"(round2_frac={args.round2_frac}, alone_frac={args.alone_frac}, "
           f"deep_frac={args.deep_frac}, "
+          f"leaf_perspective={args.leaf_perspective}, "
           f"stick_the_dealer={args.stick_the_dealer})...", flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.deep_frac,
                             args.max_deep_plies, args.seed,
                             stick_the_dealer=args.stick_the_dealer,
-                            equity_model=equity_model, alone_frac=args.alone_frac)
+                            equity_model=equity_model, alone_frac=args.alone_frac,
+                            leaf_perspective=args.leaf_perspective)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

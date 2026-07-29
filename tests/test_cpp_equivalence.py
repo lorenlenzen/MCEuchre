@@ -1022,3 +1022,59 @@ def test_policy_value_net_equivariant_under_relabeling():
             rlg = rlg.squeeze(0).numpy()
             assert np.allclose(rlg, _permute_logits(lg, pi), atol=1e-5)
             assert abs(float(rval) - val) < 1e-5
+
+
+# --- actor-conditioned leaf values: both engines pick the same perspective -
+# The leaf value used to come from the leaf's own acting player (the opening
+# leader), which averages away the searching actor's hand -- see
+# rebel/train_rebel.py's batch_value_fn_from_net docstring. The perspective is
+# bound into the Python callable handed to the solver at construction, so
+# nothing under cpp/ changed; these confirm both engines therefore agree.
+
+@pytest.mark.parametrize("seed", range(8))
+def test_leaf_value_perspective_matches_python(seed):
+    """Applies one EXPLICIT shared discard rather than resolve_dealer_discard,
+    so both engines are provably at the same state -- tied-optimal discards
+    can break differently between engines (see
+    test_resolve_dealer_discard_value_matches_python), which would show up
+    here as a spurious mismatch whenever the perspective IS the dealer."""
+    from rebel.train_rebel import (batch_value_fn_from_net,
+                                   cpp_batch_value_fn_from_net)
+    from rebel.networks import PolicyValueNet
+    torch.manual_seed(seed)
+    net = PolicyValueNet()
+    py_st, cpp_st = _deal_both(seed, dealer=seed % 4)
+    py_dd, cpp_dd = _apply_index(py_st, cpp_st,
+                                 _order_up_index(py_st, alone=False))
+    assert py_dd.phase == Phase.DEALER_DISCARD
+    py_play, cpp_play = _apply_index(
+        py_dd, cpp_dd, action_to_index(py_dd.legal_actions()[0]))
+    assert py_play.phase == Phase.PLAY
+
+    for p in range(4):
+        py_v = batch_value_fn_from_net(net, perspective=p)([py_play])[0]
+        cpp_v = cpp_batch_value_fn_from_net(net, perspective=p)([cpp_play])[0]
+        assert py_v == pytest.approx(cpp_v, abs=1e-6), (
+            f"perspective={p} seed={seed}: py={py_v} cpp={cpp_v}")
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_grounded_value_sample_matches_across_engines(seed):
+    """_grounded_value_sample now captures the BIDDER's observation and
+    varies which seat bids; both engine branches must stay in step.
+
+    Compares cluster_key and value, not the raw observation: the two engines
+    may pick different tied-optimal discards, and when the bidder IS the
+    dealer that changes the observation while leaving the value identical (a
+    tie means equal value by definition)."""
+    from rebel.train_rebel import ReBeLTrainer
+    py_t = ReBeLTrainer(engine="python", value_ground_frac=1.0, seed=seed)
+    cpp_t = ReBeLTrainer(engine="cpp", value_ground_frac=1.0, seed=seed)
+    for _ in range(12):
+        a, b = py_t._grounded_value_sample(), cpp_t._grounded_value_sample()
+        assert (a is None) == (b is None)
+        if a is None:
+            continue
+        assert a.cluster_key == b.cluster_key
+        assert a.value == pytest.approx(b.value, abs=1e-6)
+        assert a.obs.shape == b.obs.shape == (PY_OBS_SIZE,)

@@ -321,3 +321,23 @@ def test_bid_round2_internal_to_bid_round1_solve_stays_free():
     assert len(solver.infosets) < 60, (
         f"bidding-rooted solve built {len(solver.infosets)} infosets -- "
         f"BID_ROUND_2 may no longer be free as an internal node")
+
+
+def test_cfr_search_agent_factory_binds_the_acting_player():
+    """batch_value_fn_factory lets play-time search score leaves from the
+    searching player's own infoset, matching how training generates targets
+    (see rebel/train_rebel.py's batch_value_fn_from_net docstring)."""
+    import random as _random
+    from euchre.game import EuchreState
+    from rebel.subgame import CFRSearchAgent
+    seen = []
+
+    def factory(actor):
+        seen.append(actor)
+        return lambda states: [0.0] * len(states)
+
+    st = EuchreState.new_hand(dealer=0).deal(_random.Random(0))
+    agent = CFRSearchAgent(num_worlds=2, iterations=4, depth_limit=3,
+                           batch_value_fn_factory=factory, seed=0)
+    agent.act(st, _random.Random(0))
+    assert seen == [st.current_player]

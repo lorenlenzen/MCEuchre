@@ -38,7 +38,8 @@ from rebel.pimc import resolve_dealer_discard, rollout_value
 from rebel.train_rebel import ReBeLTrainer
 
 
-def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5):
+def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5,
+                  leaf_perspective="actor"):
     """(obs, value_target) pairs for post-call states -- exactly the kind of
     leaf `batch_value_fn_from_net` gets asked to score during CFR search
     (SubgameSolver's bidding-rooted solves now cut exactly at the phase
@@ -57,7 +58,18 @@ def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5):
     than it did pre-correction, purely from one side moving and not the
     other. Default 0.5, not alone's real (much rarer) frequency -- the goal
     is calibration parity between the two options being compared, not
-    matching how often either occurs in real play."""
+    matching how often either occurs in real play.
+
+    `leaf_perspective` picks whose infoset the observation is taken from.
+    "actor" (default) uses the BIDDER's seat, matching how the CFR search now
+    queries leaves (see ReBeLTrainer._value_fn_for). "leaf" is the historical
+    behavior -- the leaf's own acting player, i.e. the opening leader -- which
+    marginalizes over the bidder's own hand and so trains an accurate
+    estimator of a quantity no bid decision can use; retained only to
+    reproduce pre-fix checkpoints."""
+    if leaf_perspective not in ("actor", "leaf"):
+        raise ValueError("leaf_perspective must be 'actor' or 'leaf', "
+                         f"got {leaf_perspective!r}")
     helper = ReBeLTrainer(seed=seed, equity_model=equity_model)  # only for _fresh_deal
     rng = random.Random(seed + 1)
     out = []
@@ -77,11 +89,23 @@ def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5):
                     if isinstance(a, Call) and a.alone == want_alone]
             if not calls:
                 continue  # defensive; should be unreachable
+            actor = state.current_player
             # Call (round 2) skips DEALER_DISCARD entirely -- goes straight
             # to Phase.PLAY (_apply_bid2 calls _begin_play() directly), so
             # nxt is already the right kind of leaf, no further resolution.
             nxt = state.apply(rng.choice(calls))
         else:
+            # Vary WHICH seat orders up: bidding opens left of the dealer,
+            # who is also the opening leader after a call, so ordering up
+            # straight off the deal only ever grounds the one seat where
+            # bidder and leader coincide -- the case where leaf_perspective
+            # makes no difference at all (measured: 200/200 identical
+            # samples before this).
+            for _ in range(rng.randint(0, 3)):
+                state = state.apply(Pass())
+            if state.phase != Phase.BID_ROUND_1:
+                continue  # defensive; 0-3 passes never leaves round 1
+            actor = state.current_player
             want_alone = rng.random() < alone_frac
             dd_state = state.apply(OrderUp(alone=want_alone))
             # OrderUp (round 1) DOES go through DEALER_DISCARD first --
@@ -96,9 +120,9 @@ def build_samples(n, round2_frac, seed, equity_model=None, alone_frac=0.5):
         v0 = rollout_value(nxt, team0_score=nxt.team0_score,
                            team1_score=nxt.team1_score,
                            equity_model=equity_model)
-        leaf_player = nxt.current_player
-        target = v0 if team_of(leaf_player) == 0 else -v0
-        obs = observation_tensor(nxt, leaf_player)
+        p = actor if leaf_perspective == "actor" else nxt.current_player
+        target = v0 if team_of(p) == 0 else -v0
+        obs = observation_tensor(nxt, p)
         out.append((obs, target))
     return out
 
@@ -124,6 +148,14 @@ def main():
                          "alone, sampled independently of --round2-frac -- "
                          "see build_samples()'s docstring for why this "
                          "can't stay hardcoded to not-alone.")
+    ap.add_argument("--leaf-perspective", choices=["actor", "leaf"],
+                    default="actor",
+                    help="whose infoset the leaf observation comes from. "
+                         "'actor' (default) is the bidder, matching how the "
+                         "CFR search queries leaves; 'leaf' is the old "
+                         "opening-leader view, which averages away the "
+                         "bidder's own hand -- kept only to reproduce "
+                         "pre-fix checkpoints.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3,
                     help="stop if val MSE hasn't improved for this many epochs")
@@ -161,10 +193,11 @@ def main():
     print(f"resumed from {args.resume}", flush=True)
 
     print(f"generating {args.samples} post-call value samples "
-          f"(round2_frac={args.round2_frac}, alone_frac={args.alone_frac})...",
-          flush=True)
+          f"(round2_frac={args.round2_frac}, alone_frac={args.alone_frac}, "
+          f"leaf_perspective={args.leaf_perspective})...", flush=True)
     samples = build_samples(args.samples, args.round2_frac, args.seed,
-                            equity_model=equity_model, alone_frac=args.alone_frac)
+                            equity_model=equity_model, alone_frac=args.alone_frac,
+                            leaf_perspective=args.leaf_perspective)
     rng = random.Random(args.seed + 2)
     rng.shuffle(samples)
     n_val = int(len(samples) * args.val_frac)

@@ -101,7 +101,9 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         cfr_iterations=cfg["iters"], depth_limit=cfg["depth"],
         full_depth_cards=cfg["fdc"], belief_model=belief_model,
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
-        value_ground_frac=cfg["value_ground"], equity_model=equity_model,
+        value_ground_frac=cfg["value_ground"],
+        bid_exact_frac=cfg["bid_exact"], bid2_exact_frac=cfg["bid2_exact"],
+        bid_exact_worlds=cfg["bid_exact_worlds"], equity_model=equity_model,
         engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
     local_v = -1
@@ -179,6 +181,45 @@ def main():
                          "estimates against reality) -- see "
                          "scripts/recalibrate_value.py for the one-shot "
                          "version of the same fix. Off by default.")
+    ap.add_argument("--bid-exact-frac", type=float, default=0.0,
+                    help="fraction of round-1 BIDDING decisions solved with "
+                         "EVERY leaf valued by exact double-dummy instead of "
+                         "the value net (all-or-nothing per solve, never "
+                         "mixed within one tree). Unlike --value-ground-frac, "
+                         "which is value-only, these samples supervise the "
+                         "bid POLICY head against ground truth -- the only "
+                         "thing in the pipeline that does. Measured on the "
+                         "bid1 quiz: net-leaf search 3/9, exact-leaf search "
+                         "6/9, fixing every over-aggressive call. Keep it "
+                         "modest (~0.05): double-dummy hands the defense "
+                         "perfect information, so it leans conservative, and "
+                         "the same measurement introduced three over-passive "
+                         "errors. Off by default.")
+    ap.add_argument("--bid2-exact-frac", type=float, default=0.0,
+                    help="same as --bid-exact-frac but for round-2-rooted "
+                         "decisions. Separate knob purely on cost: a bid2 "
+                         "solve is ~2000 leaves/world against bid1's ~48. A "
+                         "bid1 solve already contains the whole round-2 "
+                         "auction internally, so --bid-exact-frac alone still "
+                         "grounds round-2 reasoning. Off by default.")
+    ap.add_argument("--bid-exact-worlds", type=int, default=None,
+                    help="belief worlds for exact-leaf solves only (defaults "
+                         "to --num-worlds). Lower is usually right: each leaf "
+                         "costs a double-dummy solve rather than a slice of "
+                         "one batched forward pass.")
+    ap.add_argument("--fresh-optimizer", action="store_true",
+                    help="ignore the resumed checkpoint's sibling .opt.pt and "
+                         "start Adam from zero state. Worth it after a change "
+                         "to WHAT the value head predicts (e.g. the "
+                         "actor-conditioned leaf perspective): Adam's "
+                         "second-moment estimates are a preconditioner fitted "
+                         "to the old gradient distribution, and pairing a "
+                         "stale, small variance estimate with the large "
+                         "gradients a newly-seen input region produces gives "
+                         "oversized steps exactly when the net is least "
+                         "stable. Cheap insurance -- the moments rebuild in "
+                         "~1000 steps (beta2=0.999), noise against a "
+                         "multi-hour run.")
     ap.add_argument("--match-equity-table", type=str,
                     default="rebel/match_equity_table.json",
                     help="path to the precomputed match-equity table (see "
@@ -275,7 +316,10 @@ def main():
         # never had an optimizer) just means starting Adam fresh, same as
         # before this existed.
         opt_path = os.path.splitext(args.resume)[0] + ".opt.pt"
-        if os.path.exists(opt_path):
+        if args.fresh_optimizer:
+            print(f"ignoring optimizer state at {opt_path} "
+                  f"(--fresh-optimizer)", flush=True)
+        elif os.path.exists(opt_path):
             learner.opt.load_state_dict(torch.load(opt_path, map_location="cpu"))
             print(f"resumed optimizer state from {opt_path}", flush=True)
         else:
@@ -303,6 +347,9 @@ def main():
            "fdc": args.full_depth_cards, "stick": args.stick_the_dealer,
            "round2_seed": args.round2_seed_frac,
            "value_ground": args.value_ground_frac,
+           "bid_exact": args.bid_exact_frac,
+           "bid2_exact": args.bid2_exact_frac,
+           "bid_exact_worlds": args.bid_exact_worlds,
            "equity_table": equity_table_path,
            "engine": args.engine}
 
