@@ -114,6 +114,15 @@ def main():
                          "alone's own value estimate uncorrected while "
                          "not-alone's got fixed -- see "
                          "ReBeLTrainer._grounded_value_sample's docstring.")
+    ap.add_argument("--freeze-trunk", action="store_true",
+                    help="update only the value head, leaving the shared "
+                         "suit-encoder/context trunk fixed. Strongly "
+                         "recommended: this loss has no policy term, but "
+                         "without this the trunk still moves and drags the "
+                         "policy heads with it -- measured at a 3-question "
+                         "quiz regression (12/27 -> 9/27) on a run that "
+                         "improved the value MSE it was optimizing. Off by "
+                         "default only to preserve prior behavior.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3,
                     help="stop if val MSE hasn't improved for this many epochs")
@@ -203,10 +212,17 @@ def main():
     best_val_mse = val_mse()
     best_state = {k: v.clone() for k, v in net.state_dict().items()}
     stale = 0
-    # only the value head's parameters get gradients from this loss, but the
-    # trunk is shared, so use a real optimizer over all params with a loss
-    # that has ZERO policy term -- policy logits get no gradient signal here.
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
+    # The loss has ZERO policy term, so the policy heads never get a gradient
+    # directly -- but the trunk is shared, and with Adam running over every
+    # parameter it moves, which changes the policy heads' inputs and so their
+    # outputs. That is not hypothetical: this script over 20,000 samples,
+    # with a held-out split and early stopping, still cost 3 quiz questions
+    # (12/27 -> 9/27) while improving the value MSE it was optimizing.
+    # --freeze-trunk restricts the update to the value head, which is the
+    # only thing this loss actually has an opinion about.
+    params = (net.head_parameters(value_only=True) if args.freeze_trunk
+              else net.parameters())
+    opt = torch.optim.Adam(params, lr=args.lr)
 
     for epoch in range(1, args.max_epochs + 1):
         rng.shuffle(train)

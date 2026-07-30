@@ -84,6 +84,33 @@ class PolicyValueNet(nn.Module):
         self.pass_head = nn.Linear(context, 1)
         self.value_head = MLP(context, hidden, 1, depth=2)
 
+    # -- parameter groups for partial fine-tuning ---------------------------
+    # `suit_encoder` and `context` are the shared trunk: every output goes
+    # through them, so a *targeted* correction that updates them also changes
+    # behavior on positions it never trained on. Measured this session:
+    # scripts/targeted_value_ground.py, over 20,000 samples with a held-out
+    # split and early stopping, still cost 3 quiz questions (12/27 -> 9/27)
+    # purely through trunk drift -- its loss has no policy term at all, but
+    # Adam ran over every parameter, so the policy heads moved underneath it.
+    # Freezing the trunk and adapting only the output heads bounds a
+    # correction to roughly the thing it was meant to fix.
+    TRUNK_MODULES = ("suit_encoder", "context")
+
+    def head_modules(self, value_only: bool = False):
+        """Output heads -- everything downstream of the shared trunk.
+
+        `value_only` for a value-only loss (recalibration/grounding), where
+        the policy heads would receive no gradient anyway and including them
+        just lets Adam's weight-decay-free state churn them for nothing."""
+        if value_only:
+            return [self.value_head]
+        return [self.value_head, self.make_trump, self.play_scorer,
+                self.discard_scorer, self.pass_head]
+
+    def head_parameters(self, value_only: bool = False):
+        for module in self.head_modules(value_only):
+            yield from module.parameters()
+
     def forward(self, obs: torch.Tensor):
         b = obs.shape[0]
         glob = obs[:, :GLOBAL_DIM]

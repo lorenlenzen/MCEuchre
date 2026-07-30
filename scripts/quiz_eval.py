@@ -396,6 +396,34 @@ def print_distribution(net, q, equity_model=None):
         print(f"  {describe(a):14s} p={dist[action_to_index(a)]:.3f}")
 
 
+def answerable_questions(quiz):
+    return [q for q in quiz["questions"]
+            if q.get("buildable")
+            and q["phase"] in ("bid1", "bid2", "discard", "play")]
+
+
+def predict_best(net, q):
+    """(best, want, ok) for one question under greedy play.
+
+    Picks the highest-scoring LEGAL action rather than argmax over the full
+    59-wide vector -- shared with scripts/train_pattern.py's collateral check
+    so the two can't quietly disagree about what the score is."""
+    st, P = build_state_any(q)
+    obs = torch.from_numpy(observation_tensor(st, P)).unsqueeze(0)
+    mask = torch.from_numpy(legal_mask(st)).unsqueeze(0)
+    with torch.no_grad():
+        dist = net.policy(obs, mask).squeeze(0).numpy()
+    best = max(st.legal_actions(), key=lambda act: dist[action_to_index(act)])
+    want = answer_action(q)
+    return best, want, action_to_index(best) == action_to_index(want)
+
+
+def score_net(net, quiz):
+    """(correct, total) over every answerable question."""
+    qs = answerable_questions(quiz)
+    return sum(predict_best(net, q)[2] for q in qs), len(qs)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--net", default="checkpoints/rebel_hq.pt")
@@ -422,8 +450,7 @@ def main():
         equity_model = MatchEquityModel.load(args.equity_table)
 
     quiz = json.load(open(args.quiz))
-    answerable = [q for q in quiz["questions"]
-                 if q.get("buildable") and q["phase"] in ("bid1", "bid2", "discard", "play")]
+    answerable = answerable_questions(quiz)
 
     if args.detail:
         for qid in args.detail:
@@ -444,16 +471,7 @@ def main():
     score_total = score_correct = 0
     total_ok = 0
     for q in answerable:
-        st, P = build_state_any(q)
-        obs = torch.from_numpy(observation_tensor(st, P)).unsqueeze(0)
-        mask = torch.from_numpy(legal_mask(st)).unsqueeze(0)
-        with torch.no_grad():
-            dist = net.policy(obs, mask).squeeze(0).numpy()
-
-        legal = st.legal_actions()
-        best = max(legal, key=lambda act: dist[action_to_index(act)])
-        want = answer_action(q)
-        ok = (action_to_index(best) == action_to_index(want))
+        best, want, ok = predict_best(net, q)
         total_ok += int(ok)
 
         flags = []

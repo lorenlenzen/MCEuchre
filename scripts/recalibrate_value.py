@@ -156,6 +156,12 @@ def main():
                          "opening-leader view, which averages away the "
                          "bidder's own hand -- kept only to reproduce "
                          "pre-fix checkpoints.")
+    ap.add_argument("--freeze-trunk", action="store_true",
+                    help="update only the value head, leaving the shared "
+                         "suit-encoder/context trunk fixed -- keeps a "
+                         "value-only recalibration from moving the policy "
+                         "heads underneath it. See targeted_value_ground.py's "
+                         "flag for the measured cost of not doing this.")
     ap.add_argument("--max-epochs", type=int, default=15)
     ap.add_argument("--patience", type=int, default=3,
                     help="stop if val MSE hasn't improved for this many epochs")
@@ -207,10 +213,13 @@ def main():
     val_mse0, val_bias0 = mse_and_bias(net, val)
     print(f"before: val_mse={val_mse0:.3f} val_bias={val_bias0:+.3f}", flush=True)
 
-    # only the value head's parameters get gradients from this loss, but the
-    # trunk is shared, so use a real optimizer over all params with a loss
-    # that has ZERO policy term -- policy logits get no gradient signal here.
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
+    # The loss has ZERO policy term, so the policy heads get no gradient
+    # directly -- but the trunk is shared, and with Adam over every parameter
+    # it moves, changing the policy heads' inputs and so their outputs. See
+    # targeted_value_ground.py for the measured cost of leaving it unfrozen.
+    params = (net.head_parameters(value_only=True) if args.freeze_trunk
+              else net.parameters())
+    opt = torch.optim.Adam(params, lr=args.lr)
     best_val_mse = val_mse0
     best_state = {k: v.clone() for k, v in net.state_dict().items()}
     stale = 0

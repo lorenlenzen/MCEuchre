@@ -109,3 +109,51 @@ def test_evaluate_rulebased_beats_random():
     assert stats["hands"] == 300
     # A heuristic that calls on strong hands should beat random on average.
     assert stats["team0_mean_point_diff"] > 0
+
+
+# -- trunk freeze for targeted corrections -----------------------------------
+
+def test_head_parameters_are_disjoint_from_the_trunk():
+    from rebel.networks import PolicyValueNet
+    net = PolicyValueNet()
+    head_ids = {id(p) for p in net.head_parameters()}
+    trunk_ids = {id(p) for m in PolicyValueNet.TRUNK_MODULES
+                 for p in getattr(net, m).parameters()}
+    assert head_ids and trunk_ids
+    assert not (head_ids & trunk_ids)
+    # value_only is a strict subset of the full head set
+    assert {id(p) for p in net.head_parameters(value_only=True)} < head_ids
+
+
+def test_freezing_the_trunk_actually_holds_it_fixed():
+    """The point of the flag: a value-only loss gives the policy heads no
+    gradient, but with Adam over every parameter the SHARED trunk still
+    moves, which changes the policy heads' inputs and so their outputs. This
+    pins that mechanism -- the policy heads move zero tensors either way; it
+    is the trunk that does or doesn't."""
+    import torch
+    from rebel.networks import PolicyValueNet
+    from euchre.infoset import OBS_SIZE
+    moved_trunk = {}
+    for freeze in (True, False):
+        torch.manual_seed(0)
+        net = PolicyValueNet()
+        before = {k: v.clone() for k, v in net.state_dict().items()}
+        params = (net.head_parameters(value_only=True) if freeze
+                  else net.parameters())
+        opt = torch.optim.Adam(params, lr=1e-2)
+        obs = torch.randn(8, OBS_SIZE)
+        for _ in range(3):
+            _, value = net(obs)
+            loss = ((value - 1.0) ** 2).mean()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        moved = [k for k, v in net.state_dict().items()
+                 if not torch.equal(v, before[k])]
+        moved_trunk[freeze] = [k for k in moved
+                               if k.split(".")[0] in PolicyValueNet.TRUNK_MODULES]
+        assert any(k.startswith("value_head") for k in moved), \
+            "the value head should always move under a value loss"
+    assert moved_trunk[True] == []
+    assert moved_trunk[False], "unfrozen, the shared trunk must move"
