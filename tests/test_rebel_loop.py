@@ -564,3 +564,64 @@ def test_exact_leaf_bid_solve_tags_its_samples():
         [s.cluster_key for s in bid]
     # exact-leaf samples DO supervise the policy head -- that's their point
     assert all(s.supervise_policy for s in bid)
+
+
+# -- bidding cluster keys carry seat and near-win context ---------------------
+
+def test_bidding_cluster_key_carries_both_teams_score_buckets():
+    """hand strength alone explained 0.018 of the value head's squared-error
+    variance above a matched random control -- barely better than splitting
+    at random. Adding per-team score buckets takes that to 0.269, and
+    prioritized replay weights clusters by measured loss, so the partition
+    has to track loss to be worth anything."""
+    from rebel.match_equity import MatchEquityModel
+    eq = MatchEquityModel.load("rebel/match_equity_table.json")
+    tr = ReBeLTrainer(equity_model=eq, seed=4)
+    combos = set()
+    for _ in range(400):
+        st = tr._fresh_deal()
+        key = tr._cluster_key(st, st.current_player)
+        assert len(key) == 4, key            # phase, strength, mine, theirs
+        phase, strength, mine, theirs = key
+        assert phase == "bid1"
+        assert isinstance(strength, int)
+        assert mine in (0, 1, 2) and theirs in (0, 1, 2)
+        combos.add((mine, theirs))
+    assert len(combos) > 1, "score buckets never varied across sampled scores"
+
+
+def test_score_buckets_use_the_documented_cut_points():
+    """0-5 / 6-7 / 8-9 for a race to 10. The 8 boundary is the load-bearing
+    one -- from there a single 2-point hand ends the match."""
+    tr = ReBeLTrainer(seed=0)
+    got = [tr._score_bucket(s, 10) for s in range(10)]
+    assert got == [0, 0, 0, 0, 0, 0, 1, 1, 2, 2], got
+    # cuts are fractions of the target, so a different race still splits
+    assert [tr._score_bucket(s, 5) for s in range(5)] == [0, 0, 0, 1, 2]
+
+
+def test_score_buckets_are_actor_relative():
+    """'mine' must follow the ACTOR's team, not team0 -- otherwise the bucket
+    means the opposite thing for half the seats and pools two opposite
+    situations into one cluster."""
+    tr = ReBeLTrainer(seed=0)
+    seat_t0, seat_t1 = 0, 1
+    assert tr._score_context(seat_t0, team0=8, team1=1) == (2, 0)
+    assert tr._score_context(seat_t1, team0=8, team1=1) == (0, 2)
+
+
+def test_cluster_key_without_equity_model_is_still_well_formed():
+    tr = ReBeLTrainer(seed=0)          # no equity model -> every deal 0-0
+    st = tr._fresh_deal()
+    key = tr._cluster_key(st, st.current_player)
+    assert len(key) == 4 and key[2] == 0 and key[3] == 0
+
+
+def test_non_bidding_phases_keep_their_coarse_key():
+    """Discard/play were left as one bucket each -- no diagnosed weakness
+    there to target, and splitting them would only thin the priorities."""
+    from euchre.actions import OrderUp
+    tr = ReBeLTrainer(seed=0)
+    st = tr._fresh_deal().apply(OrderUp(alone=False))
+    key = tr._cluster_key(st, st.current_player)
+    assert key == ("DEALER_DISCARD",), key

@@ -89,9 +89,9 @@ def cluster_mse(net, samples):
 def print_cluster_table(title, stats, top_n):
     rows = sorted(stats.items(), key=lambda kv: -kv[1][0])[:top_n]
     print(f"  {title}")
-    print(f"    {'cluster':<22}{'count':>7}{'mse':>10}")
+    print(f"    {'cluster':<46}{'count':>7}{'mse':>10}")
     for key, (mse, count) in rows:
-        print(f"    {str(key):<22}{count:>7}{mse:>10.3f}")
+        print(f"    {str(key):<46}{count:>7}{mse:>10.3f}")
 
 
 def main():
@@ -265,11 +265,11 @@ def main():
     print(f"  overall mse: {overall_mse_after:.3f} (was {overall_mse_before:.3f})",
           flush=True)
 
-    print(f"\n  {'cluster':<22}{'before':>10}{'after':>10}{'weight':>9}")
+    print(f"\n  {'cluster':<46}{'before':>10}{'after':>10}{'weight':>9}")
     for k, _ in sorted(before_stats.items(), key=lambda kv: -kv[1][0])[:args.top_n]:
         b = before_stats[k][0]
         a = after_stats.get(k, (float('nan'), 0))[0]
-        print(f"  {str(k):<22}{b:>10.3f}{a:>10.3f}{cluster_weight.get(k, 1.0):>9.2f}")
+        print(f"  {str(k):<46}{b:>10.3f}{a:>10.3f}{cluster_weight.get(k, 1.0):>9.2f}")
 
     torch.save(net.state_dict(), args.out + ".pt")
     print(f"\nsaved to {args.out}.pt", flush=True)

@@ -413,41 +413,102 @@ class ReBeLTrainer:
     _BUCKET_WIDTH = 0.4  # PointCountAgent's thresholds are 2.2/2.4/3.6, so this
                          # gives ~11 buckets over the practical [0, ~4.5] range
 
+    # Score-bucket cut points, as a fraction of the target so a table built
+    # for a race to something other than 10 still splits sensibly: comfortably
+    # behind / closing / within one hand of winning. That last boundary is the
+    # one that matters -- from 8 a single 2-point hand ends the match, so the
+    # risk of being euchred stops being symmetric. Measured against matched
+    # random controls, these cuts explain 0.221 of the value head's
+    # squared-error variance from nine clusters; "within 3 of the target" as a
+    # pair of flags managed 0.183, and moving the cuts to 7/9 dropped it to
+    # 0.188 -- so 6 and 8 are doing real work, not arbitrary.
+    _SCORE_CUTS = (0.6, 0.8)
+
+    def _score_bucket(self, score: int, target: int) -> int:
+        lo, hi = (int(target * c) for c in self._SCORE_CUTS)
+        return 0 if score < lo else (1 if score < hi else 2)
+
+    def _score_context(self, actor: int, team0: int, team1: int):
+        """(my_score_bucket, their_score_bucket) -- the match context bidding
+        clusters key on alongside hand strength.
+
+        Deliberately NOT "how far along is the match": CFR's utilities here
+        are match equity, and what bends that surface is how close each side
+        is to the target, per side. Both teams' buckets are needed, not just
+        the actor's -- being at 8 is a different decision depending on
+        whether the opponents are at 2 or at 8.
+
+        Measured as excess over a matched random control (a partition into
+        the same cluster sizes with membership shuffled, which matters
+        because variance explained inflates with cluster COUNT): this pair
+        scores 0.221, "within 3 of the target" flags 0.183, leading-score
+        thirds only 0.072 and mostly inflation. Hand strength alone -- the
+        entire original key -- scored 0.018. Prioritized replay weights
+        clusters by their measured loss, so a partition that doesn't track
+        loss is steering on noise.
+
+        Seat (position relative to the dealer) was measured too and left
+        out. It carries real signal (0.041 with hand strength) but costs a
+        4x cluster multiplier, and once the score axis is this good it stops
+        paying: strength + score reached 0.269 excess from 81 clusters,
+        against 0.258 from the 138 that adding seat produced. Worth
+        revisiting if the target ever becomes policy error rather than
+        value error -- seat plausibly matters more to the pass/order
+        decision than to leaf-value calibration, which is all this measured.
+        """
+        target = getattr(self.equity_model, "target", 10) or 10
+        mine, theirs = ((team0, team1) if team_of(actor) == 0
+                        else (team1, team0))
+        return (self._score_bucket(mine, target),
+                self._score_bucket(theirs, target))
+
     def _cluster_key(self, state, actor: int) -> Any:
-        """Group a decision into a rough hand-strength bucket for prioritized
-        replay. Only bidding phases get fine-grained buckets, via the same
-        point-count score used by PointCountAgent -- that's the axis the quiz
-        scorecard actually showed weakness on (under-calling marginal
-        ace-heavy hands, spurious alone calls). Discard/play get one coarse
-        bucket each for now; no diagnosed weakness there yet to target.
+        """Group a decision for prioritized replay: for bidding, a
+        (phase, hand-strength bucket, my score bucket,
+        their score bucket) tuple; for
+        discard/play, one coarse bucket each (no diagnosed weakness there yet
+        to target).
+
+        Hand strength is PointCountAgent's score, the axis the quiz scorecard
+        first showed weakness on. The score buckets were added after
+        measuring that strength ALONE explains almost nothing about where
+        the value head is actually wrong -- 0.018 of squared-error variance
+        above a matched random control, against 0.269 once score context is
+        included. See _score_context. Note
+        that `alone`, the single strongest axis measured (5x), can't appear
+        here: at a bid decision the actor hasn't chosen yet and the sample's
+        policy target spans every action. It lives on grounding keys instead,
+        where the sample IS one concrete post-call leaf -- see _ground_key.
 
         Cluster keys are only ever compared within one trainer's lifetime
         (self.engine is fixed at construction), so it's fine that the cpp
         branch's phase-name strings ("BidRound1") differ in spelling from
         the Python branch's ("BID_ROUND_1") -- they never need to match
         across engines, only to group consistently within one."""
+        ctx = self._score_context(actor, state.team0_score,
+                                  state.team1_score)
         if self.engine == "cpp":
             from euchre.cards import Card as PyCard, Suit as PySuit
             hand = [PyCard.from_id(c) for c in range(24) if (state.hands[actor] >> c) & 1]
             if state.phase == self._cpp.Phase.BidRound1:
                 up_suit = PyCard.from_id(state.up_card).suit
                 score = self._point_count.hand_score(hand, up_suit)
-                return ("bid1", int(score // self._BUCKET_WIDTH))
+                return ("bid1", int(score // self._BUCKET_WIDTH)) + ctx
             if state.phase == self._cpp.Phase.BidRound2:
                 turned = PySuit(state.turned_down)
                 score = max(self._point_count.hand_score(hand, s) for s in PySuit
                            if s != turned)
-                return ("bid2", int(score // self._BUCKET_WIDTH))
+                return ("bid2", int(score // self._BUCKET_WIDTH)) + ctx
             return (state.phase.name,)
 
         hand = state.hands[actor]
         if state.phase == Phase.BID_ROUND_1:
             score = self._point_count.hand_score(hand, state.up_card.suit)
-            return ("bid1", int(score // self._BUCKET_WIDTH))
+            return ("bid1", int(score // self._BUCKET_WIDTH)) + ctx
         if state.phase == Phase.BID_ROUND_2:
             score = max(self._point_count.hand_score(hand, s) for s in Suit
                        if s != state.turned_down)
-            return ("bid2", int(score // self._BUCKET_WIDTH))
+            return ("bid2", int(score // self._BUCKET_WIDTH)) + ctx
         return (state.phase.name,)
 
     # -- leaf value from the current network ---------------------------------
