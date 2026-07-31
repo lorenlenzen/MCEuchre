@@ -51,7 +51,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from quiz_eval import build_state_any, score_net  # noqa: E402
 
 from euchre.actions import NUM_ACTIONS, Pass, action_to_index  # noqa: E402
-from euchre.cards import Card, Rank, Suit  # noqa: E402
+from euchre.cards import Card, Rank, Suit, effective_suit  # noqa: E402
 from euchre.game import EuchreState, Phase, team_of  # noqa: E402
 from euchre.infoset import observation_tensor  # noqa: E402
 from rebel.match_equity import MatchEquityModel  # noqa: E402
@@ -144,18 +144,66 @@ def choose_required(patterns, rng, attempts=20):
     return None
 
 
-def constrained_deal(trainer, patterns, phase, rng):
-    """A deal in which the seat about to act holds a card for every pattern.
+def parse_voids(text):
+    """"up" or a suit letter, comma-separated -> a list of void specs.
+
+    `up` means the up-card's own suit, which is the one that matters for a
+    round-1 decision: void there means ordering up leaves you with ZERO
+    trump. Voids are evaluated by EFFECTIVE suit with the up-card's suit as
+    trump, so a void in `up` correctly excludes the left bower too -- it is a
+    trump void, not merely an absence of that printed suit.
+    """
+    out = []
+    for tok in (t.strip().upper() for t in text.split(",") if t.strip()):
+        if tok in ("UP", "TRUMP"):
+            out.append("up")
+        elif tok in _SUITS:
+            out.append(tok)
+        else:
+            raise ValueError(f"--void token {tok!r} must be 'up' or one of "
+                             f"{''.join(_SUITS)}")
+    return out
+
+
+def parse_score(text):
+    """"9,6" -> (9, 6), read as (my score, their score) from the ACTING
+    player's side, not team0's."""
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"--score must look like 9,6 (mine,theirs), "
+                         f"got {text!r}")
+    return int(parts[0]), int(parts[1])
+
+
+def _forbidden_for_voids(voids, up):
+    """Cards the acting hand may not hold, given the up-card."""
+    out = set()
+    for v in voids:
+        suit = up.suit if v == "up" else _SUITS[v]
+        out |= {c for c in _ALL_CARDS if effective_suit(c, up.suit) == suit}
+    return out
+
+
+def constrained_deal(trainer, patterns, phase, rng, voids=(), score=None):
+    """A deal in which the seat about to act holds a card for every pattern,
+    is void where asked, and (optionally) faces a pinned match score.
 
     Placed rather than waited for: rejection-sampling a tight structural
     pattern is hopeless at this scale -- all four jacks is 0.047% of hands per
     seat, ~640,000 draws for 300 samples -- and it also isn't what you want,
     since every accepted deal would still be one arbitrary deal. Here the
-    required cards are fixed and *everything else* varies: the remaining
-    card(s), the up-card, the dealer, the score, and all three opponents'
-    hands. Returns (state, passes_to_apply), or None if the draw failed.
+    constrained parts are fixed and *everything else* varies: the rest of the
+    hand, the up-card, the dealer, all three opponents' hands, and the score
+    unless pinned. Returns (state, passes_to_apply), or None if the draw
+    failed.
+
+    The up-card is drawn BEFORE the hand is filled, because `--void up` is
+    defined relative to it. Retries a bounded number of times rather than
+    looping forever: some combinations are simply unsatisfiable (five cards
+    void in `up` when the required cards include a club, say), and the caller
+    counts failures against --max-tries.
     """
-    required = choose_required(patterns, rng)
+    required = choose_required(patterns, rng) if patterns else []
     if required is None:
         return None
     passes = rng.randint(0, 3) if phase == "bid1" else 4 + rng.randint(0, 3)
@@ -164,20 +212,41 @@ def constrained_deal(trainer, patterns, phase, rng):
     # passes: bidding opens at dealer+1 and round 2 reopens there too.
     dealer = (actor - 1 - passes) % 4
 
-    pool = [c for c in _ALL_CARDS if c not in set(required)]
-    rng.shuffle(pool)
-    hands = [None] * 4
-    hands[actor] = list(required) + pool[:5 - len(required)]
-    idx = 5 - len(required)
-    for seat in range(4):
-        if seat == actor:
+    req = set(required)
+    hands = up = kitty = None
+    for _ in range(40):
+        cand_up = rng.choice([c for c in _ALL_CARDS if c not in req])
+        forbidden = _forbidden_for_voids(voids, cand_up) if voids else set()
+        if req & forbidden:
+            continue                      # required card violates the void
+        pool = [c for c in _ALL_CARDS if c != cand_up and c not in req]
+        allowed = [c for c in pool if c not in forbidden]
+        need = 5 - len(required)
+        if len(allowed) < need:
             continue
-        hands[seat] = pool[idx:idx + 5]
-        idx += 5
-    up, kitty = pool[idx], pool[idx + 1:idx + 4]
+        rng.shuffle(allowed)
+        hand = list(required) + allowed[:need]
+        rest = [c for c in pool if c not in set(hand)]
+        rng.shuffle(rest)
+        hands = [None] * 4
+        hands[actor] = hand
+        i = 0
+        for seat in range(4):
+            if seat == actor:
+                continue
+            hands[seat] = rest[i:i + 5]
+            i += 5
+        up, kitty = cand_up, rest[i:i + 3]
+        break
+    if hands is None:
+        return None
 
     team0_score = team1_score = 0
-    if trainer.equity_model is not None:
+    if score is not None:
+        mine, theirs = score
+        team0_score, team1_score = ((mine, theirs) if team_of(actor) == 0
+                                    else (theirs, mine))
+    elif trainer.equity_model is not None:
         dealer_score, other_score = trainer.equity_model.sample_score(rng)
         if team_of(dealer) == 0:
             team0_score, team1_score = dealer_score, other_score
@@ -239,7 +308,7 @@ def walk_to_phase(trainer, state, phase, rng):
 
 
 def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
-             patterns=None, phase="bid1"):
+             patterns=None, phase="bid1", voids=(), score=None):
     """n exact-leaf-solved Samples matching the requested pattern.
 
     Two selection modes. `cluster` rejection-samples until the deal lands in a
@@ -253,7 +322,8 @@ def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
     while len(out) < n and tries < max_tries:
         tries += 1
         if patterns is not None:
-            drawn = constrained_deal(trainer, patterns, phase, rng)
+            drawn = constrained_deal(trainer, patterns, phase, rng,
+                                     voids=voids, score=score)
             if drawn is None:
                 continue
             state = apply_passes(trainer, *drawn)
@@ -356,6 +426,20 @@ def main():
     ap.add_argument("--phase", choices=["bid1", "bid2"], default="bid1",
                     help="which decision to solve, for --require (with "
                          "--quiz-id/--cluster the phase comes from those).")
+    ap.add_argument("--void", type=str, default=None,
+                    help="suits the acting hand must be VOID in: 'up' for the "
+                         "up-card's suit, or a suit letter, comma-separated. "
+                         "'up' is the useful one -- it means ordering up "
+                         "leaves you with zero trump. Evaluated by effective "
+                         "suit, so it excludes the left bower too rather than "
+                         "just the printed suit. Combines with --require; use "
+                         "--require '**' if you only want a void.")
+    ap.add_argument("--score", type=str, default=None,
+                    help="pin the match score as MINE,THEIRS from the acting "
+                         "player's side, e.g. '9,6'. Without this the score "
+                         "is sampled per deal from the equity model. Needed "
+                         "for score-dependent patterns like the 9-6 donation, "
+                         "where the right play exists only at that score.")
     ap.add_argument("--quiz", type=str, default="docs/euchre_quiz.json")
     ap.add_argument("--samples", type=int, default=300)
     ap.add_argument("--max-tries", type=int, default=200000)
@@ -390,6 +474,15 @@ def main():
     if len(given) != 1:
         raise SystemExit("give exactly one of --quiz-id, --cluster or "
                          f"--require (got {given or 'none'})")
+    # --void and --score place cards / fix the score at deal time, which only
+    # the --require constructor does; cluster selection reaches its positions
+    # by rejection sampling and has no way to impose either.
+    for flag, val in (("--void", args.void), ("--score", args.score)):
+        if val is not None and args.require is None:
+            raise SystemExit(f"{flag} needs --require (it constrains how the "
+                             f"deal is BUILT; --quiz-id/--cluster sample "
+                             f"existing deals instead). Use --require '**' if "
+                             f"you want no card requirement.")
 
     equity_model = None
     if not args.no_match_equity:
@@ -406,6 +499,13 @@ def main():
                            depth_limit=args.depth_limit, seed=args.seed)
     rng = random.Random(args.seed + 1)
     patterns, cluster = None, None
+    voids = parse_voids(args.void) if args.void else ()
+    score = parse_score(args.score) if args.score else None
+    if score is not None:
+        target = getattr(equity_model, "target", 10) or 10
+        if max(score) >= target:
+            raise SystemExit(f"--score {args.score}: a team already at "
+                             f"{target} has won; the hand would be moot")
     if args.require is not None:
         patterns = parse_require(args.require)
         # Fail loudly and immediately on an impossible ask ("J*" five times --
@@ -415,8 +515,12 @@ def main():
             raise SystemExit(
                 f"--require {args.require!r} can't be satisfied: no five "
                 f"distinct cards match those patterns simultaneously")
-        print(f"pattern: {args.phase} hands containing "
-              f"{', '.join(t for t, _ in patterns)}", flush=True)
+        desc = f"{args.phase} hands containing {', '.join(t for t, _ in patterns)}"
+        if voids:
+            desc += f", void in {'/'.join(voids)}"
+        if score is not None:
+            desc += f", at {score[0]}-{score[1]}"
+        print(f"pattern: {desc}", flush=True)
     elif args.quiz_id is not None:
         cluster, q = cluster_of_quiz_question(trainer, args.quiz, args.quiz_id)
         print(f"pattern from quiz Q{args.quiz_id}: cluster {cluster}\n"
@@ -430,7 +534,8 @@ def main():
           f"(engine={args.engine}, worlds={args.exact_worlds})...", flush=True)
     samples, tries = generate(trainer, cluster, args.samples, args.exact_worlds,
                               args.cfr_iters, args.max_tries, rng,
-                              patterns=patterns, phase=phase)
+                              patterns=patterns, phase=phase, voids=voids,
+                              score=score)
     if not samples:
         raise SystemExit(f"no usable deals in {tries} tries -- "
                          + ("stick-the-dealer may be blocking the passes "

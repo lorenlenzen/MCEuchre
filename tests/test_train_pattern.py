@@ -133,3 +133,91 @@ def test_constrained_deal_reaches_round_two():
         assert any(c.rank == Rank.KING for c in hand)
         reached += 1
     assert reached > 0
+
+
+# --- --void / --score constrained deals -------------------------------------
+
+def test_parse_voids_and_score():
+    from train_pattern import parse_score, parse_voids
+    assert parse_voids("up") == ["up"]
+    assert parse_voids("trump") == ["up"]        # alias
+    assert parse_voids("up,H") == ["up", "H"]
+    assert parse_score("9,6") == (9, 6)
+    for bad in ("X", "up,X", ""):
+        if bad == "":
+            assert parse_voids(bad) == []
+            continue
+        with pytest.raises(ValueError):
+            parse_voids(bad)
+    for bad in ("9", "9,6,1", "a,b"):
+        with pytest.raises(ValueError):
+            parse_score(bad)
+
+
+@pytest.mark.parametrize("engine", ["python", "cpp"])
+def test_void_up_means_zero_effective_trump(engine):
+    """The whole point of `--void up` is a TRUMP void, so it has to exclude
+    the left bower as well -- a hand holding the off-suit jack of the
+    up-card's colour is not trump-void, and training it as though it were
+    would teach the donation on hands that can actually take a trick."""
+    from euchre.cards import effective_suit
+    from train_pattern import (apply_passes, constrained_deal, parse_require,
+                               parse_voids)
+    trainer = ReBeLTrainer(engine=engine, seed=0)
+    rng = random.Random(5)
+    seen = 0
+    for _ in range(60):
+        drawn = constrained_deal(trainer, parse_require("**"), "bid1", rng,
+                                 voids=parse_voids("up"))
+        assert drawn is not None
+        state = apply_passes(trainer, *drawn)
+        if state is None:
+            continue
+        seen += 1
+        actor = state.current_player
+        hand = _hand(state, actor, engine)
+        up = Card.from_id(state.up_card) if engine == "cpp" else state.up_card
+        trump = [c for c in hand if effective_suit(c, up.suit) == up.suit]
+        assert trump == [], [str(c) for c in trump]
+    assert seen > 0
+
+
+@pytest.mark.parametrize("engine", ["python", "cpp"])
+def test_score_is_pinned_from_the_actors_side(engine):
+    """--score is MINE,THEIRS for whoever acts -- so it must land on team0 or
+    team1 depending on the actor's team, not always team0."""
+    from euchre.game import team_of
+    from train_pattern import (apply_passes, constrained_deal, parse_require,
+                               parse_score)
+    trainer = ReBeLTrainer(engine=engine, seed=0)
+    rng = random.Random(5)
+    teams = set()
+    for _ in range(60):
+        drawn = constrained_deal(trainer, parse_require("**"), "bid1", rng,
+                                 score=parse_score("9,6"))
+        state = apply_passes(trainer, *drawn)
+        if state is None:
+            continue
+        actor = state.current_player
+        mine, theirs = ((state.team0_score, state.team1_score)
+                        if team_of(actor) == 0
+                        else (state.team1_score, state.team0_score))
+        assert (mine, theirs) == (9, 6)
+        teams.add(team_of(actor))
+    assert teams == {0, 1}, "actor should land on both teams across draws"
+
+
+def test_void_and_require_can_be_mutually_unsatisfiable():
+    """Requiring a club while demanding a club void must fail the draw rather
+    than silently dropping one of the two constraints."""
+    from train_pattern import constrained_deal, parse_require, parse_voids
+    trainer = ReBeLTrainer(seed=0)
+    rng = random.Random(0)
+    # every up-card that makes JC/JS trump-relevant still leaves suits where
+    # 'C*' is legal, so this asks for the strictly impossible: all four clubs
+    # required AND void in clubs.
+    pats = parse_require("*C,*C,*C,*C")
+    fails = sum(constrained_deal(trainer, pats, "bid1", rng,
+                                 voids=parse_voids("C")) is None
+                for _ in range(20))
+    assert fails == 20, "a contradictory require/void pair must never deal"
