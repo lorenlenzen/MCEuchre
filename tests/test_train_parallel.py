@@ -75,3 +75,41 @@ def test_own_schema_resumes_with_offsets(tp, tmp_path):
     log, elapsed, samples = tp._load_resumable_log(str(p))
     assert log == entries
     assert elapsed == 120 and samples == 950
+
+
+# --- _evaluate: named opponents, extensible past random/rule ----------------
+
+def test_evaluate_returns_random_and_rule_by_default(tp):
+    from rebel.networks import PolicyValueNet
+    net = PolicyValueNet()
+    results = tp._evaluate(net, hands=6, seed=0)
+    assert set(results) == {"random", "rule"}
+    for diff, win in results.values():
+        assert isinstance(diff, float)
+        assert 0.0 <= win <= 1.0
+
+
+def test_evaluate_includes_extra_opponents(tp):
+    """--diagnostic-checkpoint's mechanism: an extra named opponent factory
+    gets folded into the same result dict alongside random/rule, so the
+    eval-loop and log-entry code doesn't need to special-case it."""
+    from rebel.evaluate import RandomAgent
+    from rebel.networks import PolicyValueNet
+    net = PolicyValueNet()
+    results = tp._evaluate(net, hands=6, seed=0,
+                           extra_opponents={"diagnostic": RandomAgent})
+    assert set(results) == {"random", "rule", "diagnostic"}
+
+
+def test_evaluate_extra_opponents_can_override_random_or_rule(tp):
+    """dict.update semantics: a caller-supplied "random" or "rule" key would
+    replace the built-in one rather than erroring -- not the intended use,
+    but worth pinning down since it's a natural consequence of the
+    implementation and silently swapping the sanity-floor opponent would be
+    an easy mistake to make unnoticed."""
+    from rebel.evaluate import RandomAgent
+    from rebel.networks import PolicyValueNet
+    net = PolicyValueNet()
+    results = tp._evaluate(net, hands=6, seed=0,
+                           extra_opponents={"rule": RandomAgent})
+    assert set(results) == {"random", "rule"}

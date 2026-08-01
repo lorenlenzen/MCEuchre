@@ -692,3 +692,62 @@ def test_play_exact_solve_tags_its_samples():
     tagged = [s for s in play if s.cluster_key[-1] == "exact"]
     assert tagged, "leading play decisions should be exact-tagged"
     assert all(s.supervise_policy for s in tagged)
+
+
+# -- play-exact solves get their own worlds knob, not bid_exact_worlds ------
+
+def test_play_exact_worlds_defaults_to_num_worlds_not_bid_exact_worlds():
+    """Regression test for a real bug: worlds selection used to be
+    `bid_exact_worlds if exact and bid_exact_worlds else num_worlds`, which
+    didn't check WHICH kind of exact solve was running -- setting
+    --bid-exact-worlds low (to keep bid solves cheap) silently starved
+    play-exact leads of belief coverage too. Diagnosed after a 13-hour,
+    28,895-hand run showed play-exact's cluster priority never declining and
+    play quiz accuracy flat-to-worse."""
+    from unittest.mock import patch
+    from rebel.subgame import SubgameSolver
+    seen_worlds = []
+    tr = ReBeLTrainer(num_worlds=24, cfr_iterations=4, depth_limit=4,
+                      full_depth_cards=0, bid_exact_frac=1.0, bid_exact_worlds=4,
+                      play_exact_frac=1.0, seed=2)  # play_exact_worlds left None
+
+    orig_init = SubgameSolver.__init__
+
+    def spy_init(self, *a, num_worlds=None, **kw):
+        seen_worlds.append(num_worlds)
+        return orig_init(self, *a, num_worlds=num_worlds, **kw)
+
+    with patch("rebel.train_rebel.SubgameSolver.__init__", spy_init):
+        for _ in range(3):
+            tr.self_play_hand()
+
+    assert seen_worlds, "no solves were run"
+    # every solve should be either the bid-exact override (4), the (unset,
+    # so num_worlds-falling-back) play-exact value (24), or plain net solves
+    # (24) -- specifically, 4 must NEVER appear for a PLAY solve.
+    assert any(w == 4 for w in seen_worlds), \
+        "expected at least one bid-exact solve at bid_exact_worlds=4"
+    assert all(w in (4, 24) for w in seen_worlds), seen_worlds
+
+
+def test_play_exact_worlds_overrides_independently_of_bid_exact_worlds():
+    from unittest.mock import patch
+    from rebel.subgame import SubgameSolver
+    seen_worlds = []
+    tr = ReBeLTrainer(num_worlds=24, cfr_iterations=4, depth_limit=4,
+                      full_depth_cards=0, bid_exact_frac=1.0, bid_exact_worlds=4,
+                      play_exact_frac=1.0, play_exact_worlds=6, seed=2)
+
+    orig_init = SubgameSolver.__init__
+
+    def spy_init(self, *a, num_worlds=None, **kw):
+        seen_worlds.append(num_worlds)
+        return orig_init(self, *a, num_worlds=num_worlds, **kw)
+
+    with patch("rebel.train_rebel.SubgameSolver.__init__", spy_init):
+        for _ in range(3):
+            tr.self_play_hand()
+
+    assert 6 in seen_worlds, seen_worlds          # play-exact's own override
+    assert 4 in seen_worlds, seen_worlds           # bid-exact's override, untouched
+    assert all(w in (4, 6, 24) for w in seen_worlds), seen_worlds

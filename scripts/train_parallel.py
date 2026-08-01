@@ -140,6 +140,7 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         bid_exact_worlds=cfg["bid_exact_worlds"],
         play_exact_frac=cfg["play_exact"],
         play_exact_lead_only=cfg["play_exact_lead_only"],
+        play_exact_worlds=cfg["play_exact_worlds"],
         equity_model=equity_model,
         engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
@@ -167,17 +168,31 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         t.buffer.clear()
 
 
-def _evaluate(net, hands, seed, stick_the_dealer=False):
+def _evaluate(net, hands, seed, stick_the_dealer=False, extra_opponents=None):
+    """{name: (mean_point_diff, win_rate)} for the live net (greedy) against
+    RandomAgent, RuleBasedAgent, and any `extra_opponents` factories.
+
+    Random/rule stay as a sanity floor (did training break outright?), but
+    both saturate once a net is decent -- RandomAgent has no strategy at all
+    and RuleBasedAgent is a fixed, simple heuristic (a flat trump-count
+    threshold, never goes alone), so a strong net's win rate against either
+    plateaus near its ceiling long before the net stops improving.
+    `extra_opponents` is for a frozen past checkpoint (see
+    --diagnostic-checkpoint): since it's pulled from the same skill
+    distribution as the net being trained, its win rate keeps discriminating
+    real improvement well past the point where random/rule stop moving."""
     from rebel.train_rebel import ReBeLNetAgent
     from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
     def agent():
         return ReBeLNetAgent(net, greedy=True)
-    r = evaluate(agent, RandomAgent, hands=hands, seed=seed,
-                stick_the_dealer=stick_the_dealer)
-    u = evaluate(agent, RuleBasedAgent, hands=hands, seed=seed + 1,
-                stick_the_dealer=stick_the_dealer)
-    return r["team0_mean_point_diff"], r["team0_win_rate"], \
-        u["team0_mean_point_diff"], u["team0_win_rate"]
+    opponents = {"random": RandomAgent, "rule": RuleBasedAgent}
+    opponents.update(extra_opponents or {})
+    out = {}
+    for i, (name, opp_factory) in enumerate(opponents.items()):
+        r = evaluate(agent, opp_factory, hands=hands, seed=seed + i,
+                    stick_the_dealer=stick_the_dealer)
+        out[name] = (r["team0_mean_point_diff"], r["team0_win_rate"])
+    return out
 
 
 def main():
@@ -262,6 +277,14 @@ def main():
                          "trick rather than leads only. Off by default "
                          "because 2nd/3rd/4th are already at 90-95%% and "
                          "would just pay the cost.")
+    ap.add_argument("--play-exact-worlds", type=int, default=None,
+                    help="belief worlds for play-exact solves only (defaults "
+                         "to --num-worlds). Separate from --bid-exact-worlds "
+                         "on purpose -- they used to share one knob, so "
+                         "setting --bid-exact-worlds low (to keep bid solves "
+                         "cheap) silently starved play-exact leads of belief "
+                         "coverage too, producing high-variance targets that "
+                         "never converged over a full 13-hour run.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero state. Worth it after a change "
@@ -309,6 +332,19 @@ def main():
     ap.add_argument("--publish-secs", type=float, default=20.0)
     ap.add_argument("--eval-secs", type=float, default=120.0)
     ap.add_argument("--eval-hands", type=int, default=200)
+    ap.add_argument("--diagnostic-checkpoint", type=str, default=None,
+                    help="also evaluate the live net (greedy) against a "
+                         "FROZEN net loaded once from this checkpoint, "
+                         "logged as vs_diagnostic/win_diagnostic. Random and "
+                         "rule are a sanity floor, not a progress signal --  "
+                         "both saturate once a net clears their (low, fixed) "
+                         "ceiling, e.g. RuleBasedAgent never goes alone. A "
+                         "past checkpoint from the same skill distribution "
+                         "keeps discriminating real improvement well past "
+                         "that point. Point this at a stable snapshot (e.g. "
+                         "a copy you don't keep training), not the file "
+                         "you're actively resuming from -- that one keeps "
+                         "moving underneath you.")
     ap.add_argument("--resume", type=str, default=None)
     ap.add_argument("--out", type=str, default="rebel_par")
     ap.add_argument("--engine", choices=["python", "cpp"], default="python",
@@ -330,10 +366,23 @@ def main():
                          "buffer/train_step, never self-play.")
     args = ap.parse_args()
 
-    from rebel.train_rebel import ReBeLTrainer
+    from rebel.train_rebel import ReBeLTrainer, ReBeLNetAgent
     from rebel.networks import PolicyValueNet
 
     print(f"actor engine: {args.engine}", flush=True)
+
+    # Loaded ONCE, frozen for the whole run -- re-loading it every eval would
+    # just re-read the same file, but binding it here (rather than inside
+    # _evaluate) makes it explicit that this net never changes, unlike `net`.
+    extra_opponents = {}
+    if args.diagnostic_checkpoint:
+        diag_net = PolicyValueNet()
+        diag_net.load_state_dict(torch.load(args.diagnostic_checkpoint,
+                                            map_location="cpu"))
+        diag_net.eval()
+        extra_opponents["diagnostic"] = lambda: ReBeLNetAgent(diag_net, greedy=True)
+        print(f"diagnostic opponent: {args.diagnostic_checkpoint} (frozen)",
+              flush=True)
 
     equity_table_path = None
     if not args.no_match_equity:
@@ -407,6 +456,7 @@ def main():
            "bid_exact_worlds": args.bid_exact_worlds,
            "play_exact": args.play_exact_frac,
            "play_exact_lead_only": args.play_exact_lead_only,
+           "play_exact_worlds": args.play_exact_worlds,
            "equity_table": equity_table_path,
            "engine": args.engine}
 
@@ -470,26 +520,27 @@ def main():
                 last_pub = now
 
             if now - last_eval >= args.eval_secs and total >= args.min_buffer:
-                vr, wr, vu, wu = _evaluate(net, args.eval_hands,
-                                           seed=100 + len(log),
-                                           stick_the_dealer=args.stick_the_dealer)
+                results = _evaluate(net, args.eval_hands, seed=100 + len(log),
+                                    stick_the_dealer=args.stick_the_dealer,
+                                    extra_opponents=extra_opponents)
                 cum_samples = samples_offset + total
                 hands_est = cum_samples // 13  # ~13 samples/hand
-                top_clusters = learner.cluster_stats()
                 entry = {"elapsed_s": elapsed_offset + round(now - start),
                          "samples": cum_samples,
-                         "hands_est": hands_est, "buffer": len(learner.buffer),
-                         "vs_random": round(vr, 3), "win_random": round(wr, 3),
-                         "vs_rule": round(vu, 3), "win_rule": round(wu, 3),
-                         "top_clusters": top_clusters}
+                         "hands_est": hands_est, "buffer": len(learner.buffer)}
+                for name, (diff, win) in results.items():
+                    entry[f"vs_{name}"] = round(diff, 3)
+                    entry[f"win_{name}"] = round(win, 3)
                 log.append(entry)
-                print(f"  {entry['elapsed_s']:>4}s | samples {total:>6} "
-                      f"(~{hands_est} hands) | vs random {vr:+.3f} ({wr:.2f}) "
-                      f"| vs rule {vu:+.3f} ({wu:.2f})", flush=True)
-                if top_clusters:
-                    tc = ", ".join(f"{r['key']}:{r['sample_share']:.0%}"
-                                  for r in top_clusters)
-                    print(f"       top clusters (sample share): {tc}", flush=True)
+                vr, wr = results["random"]
+                vu, wu = results["rule"]
+                line = (f"  {entry['elapsed_s']:>4}s | samples {total:>6} "
+                       f"(~{hands_est} hands) | vs random {vr:+.3f} ({wr:.2f}) "
+                       f"| vs rule {vu:+.3f} ({wu:.2f})")
+                if "diagnostic" in results:
+                    vd, wd = results["diagnostic"]
+                    line += f" | vs diagnostic {vd:+.3f} ({wd:.2f})"
+                print(line, flush=True)
                 _atomic_save(net.state_dict(), args.out + ".pt")
                 _atomic_save(learner.opt.state_dict(), args.out + ".opt.pt")
                 json.dump(log, open(log_path, "w"), indent=2)

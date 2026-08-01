@@ -80,6 +80,11 @@ def main() -> None:
                     dest="play_exact_lead_only", action="store_false",
                     default=True,
                     help="apply it at every trick position, not just leads.")
+    ap.add_argument("--play-exact-worlds", type=int, default=None,
+                    help="belief worlds for play-exact solves only (defaults "
+                         "to --num-worlds) -- kept separate from "
+                         "--bid-exact-worlds; see train_parallel.py's flag "
+                         "for the bug that shared knob caused.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero. Worth it after a change to "
@@ -147,6 +152,7 @@ def main() -> None:
         bid_exact_worlds=args.bid_exact_worlds,
         play_exact_frac=args.play_exact_frac,
         play_exact_lead_only=args.play_exact_lead_only,
+        play_exact_worlds=args.play_exact_worlds,
         belief_model=belief_model, engine=args.engine, lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
@@ -187,7 +193,6 @@ def main() -> None:
             s_rule = evaluate(net_agent, RuleBasedAgent,
                               hands=args.eval_hands, seed=200 + g,
                               stick_the_dealer=args.stick_the_dealer)
-            top_clusters = trainer.cluster_stats()
             entry = {
                 "gen": g, "hands": total_hands, "buffer": len(trainer.buffer),
                 "elapsed_s": round(time.time() - t0),
@@ -197,7 +202,6 @@ def main() -> None:
                 "win_random": round(s_rand["team0_win_rate"], 3),
                 "vs_rule": round(s_rule["team0_mean_point_diff"], 3),
                 "win_rule": round(s_rule["team0_win_rate"], 3),
-                "top_clusters": top_clusters,
             }
             log.append(entry)
             print(f"gen {g:>3} | hands {total_hands:>5} | {entry['elapsed_s']:>4}s "
@@ -205,10 +209,6 @@ def main() -> None:
                   f"| vs random {entry['vs_random']:+.3f} ({entry['win_random']:.2f}) "
                   f"| vs rule {entry['vs_rule']:+.3f} ({entry['win_rule']:.2f})",
                   flush=True)
-            if top_clusters:
-                tc = ", ".join(f"{r['key']}:{r['sample_share']:.0%}"
-                              for r in top_clusters)
-                print(f"       top clusters (sample share): {tc}", flush=True)
             torch.save(trainer.net.state_dict(), args.out + ".pt")
             torch.save(trainer.opt.state_dict(), args.out + ".opt.pt")
             json.dump(log, open(args.out + ".log.json", "w"), indent=2)

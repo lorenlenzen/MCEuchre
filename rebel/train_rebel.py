@@ -250,6 +250,7 @@ class ReBeLTrainer:
                  bid_exact_worlds: Optional[int] = None,
                  play_exact_frac: float = 0.0,
                  play_exact_lead_only: bool = True,
+                 play_exact_worlds: Optional[int] = None,
                  equity_model: Optional["MatchEquityModel"] = None,
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
@@ -353,6 +354,20 @@ class ReBeLTrainer:
         # elsewhere), and it is where the head currently beats the search.
         self.play_exact_frac = play_exact_frac
         self.play_exact_lead_only = play_exact_lead_only
+        # Own knob, deliberately NOT sharing bid_exact_worlds: self_play_hand
+        # used to select worlds with `bid_exact_worlds if exact and
+        # bid_exact_worlds else num_worlds`, which doesn't check WHICH kind
+        # of exact solve is running -- setting --bid-exact-worlds silently
+        # downgraded every play-exact lead solve to that same (usually much
+        # smaller) world count too. Diagnosed after a 13-hour, 28,895-hand
+        # run showed the (Play, exact) cluster's priority never declining and
+        # play quiz accuracy flat-to-worse: exact-leaf CFR targets are
+        # already high-variance solve-to-solve on a genuinely marginal
+        # decision even at 24 worlds (measured directly this session, std
+        # 0.24 across 12 resolves of one quiz position) -- at 4 worlds
+        # (this session's --bid-exact-worlds setting) they were likely much
+        # closer to noise than ground truth, for the entire run.
+        self.play_exact_worlds = play_exact_worlds
         # None (default) preserves exact prior behavior throughout this
         # class: every deal starts 0-0, SubgameSolver gets no equity_model
         # (raw point-differential CFR targets, unchanged), and
@@ -1020,8 +1035,16 @@ class ReBeLTrainer:
             exact = self._use_exact_leaves(state)
             leaf_fn = (self._exact_leaf_fn() if exact
                        else self._value_fn_for(actor))
-            worlds = (self.bid_exact_worlds if exact and self.bid_exact_worlds
-                      else self.num_worlds)
+            # Bid-exact and play-exact each get their OWN worlds override --
+            # see play_exact_worlds's docstring for the bug this fixes
+            # (bid_exact_worlds used to apply to both, regardless of phase).
+            if exact:
+                is_play = (state.phase == self._cpp.Phase.Play
+                          if self.engine == "cpp" else state.phase == Phase.PLAY)
+                worlds = ((self.play_exact_worlds or self.num_worlds) if is_play
+                          else (self.bid_exact_worlds or self.num_worlds))
+            else:
+                worlds = self.num_worlds
             if self.engine == "cpp":
                 depth = self._depth_for(state)
                 solver = self._cpp.SubgameSolver(
