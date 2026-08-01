@@ -71,6 +71,15 @@ def main() -> None:
     ap.add_argument("--bid-exact-worlds", type=int, default=None,
                     help="belief worlds for exact-leaf solves only (defaults "
                          "to --num-worlds).")
+    ap.add_argument("--play-exact-frac", type=float, default=0.0,
+                    help="fraction of card-play decisions solved with "
+                         "exact double-dummy leaves; see "
+                         "train_parallel.py's flag for the measurement "
+                         "that says leads are the weak spot.")
+    ap.add_argument("--play-exact-all-positions",
+                    dest="play_exact_lead_only", action="store_false",
+                    default=True,
+                    help="apply it at every trick position, not just leads.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero. Worth it after a change to "
@@ -136,6 +145,8 @@ def main() -> None:
         bid_exact_frac=args.bid_exact_frac,
         bid2_exact_frac=args.bid2_exact_frac,
         bid_exact_worlds=args.bid_exact_worlds,
+        play_exact_frac=args.play_exact_frac,
+        play_exact_lead_only=args.play_exact_lead_only,
         belief_model=belief_model, engine=args.engine, lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))

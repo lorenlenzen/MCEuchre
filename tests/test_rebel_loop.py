@@ -625,3 +625,70 @@ def test_non_bidding_phases_keep_their_coarse_key():
     st = tr._fresh_deal().apply(OrderUp(alone=False))
     key = tr._cluster_key(st, st.current_player)
     assert key == ("DEALER_DISCARD",), key
+
+
+# -- exact-leaf PLAY solves, aimed at the lead -------------------------------
+
+def _first_play_state(trainer, rng, leading):
+    """Walk to a PLAY decision either leading (empty trick) or not."""
+    from euchre.game import Phase
+    for _ in range(200):
+        st = trainer._fresh_deal()
+        while not st.is_terminal():
+            legal = st.legal_actions()
+            if len(legal) == 1:
+                st = st.apply(legal[0]); continue
+            if st.phase == Phase.PLAY and (len(st.current_trick) == 0) == leading:
+                return st
+            st = st.apply(rng.choice(legal))
+    return None
+
+
+def test_play_exact_defaults_to_leads_only():
+    """The measurement put the weakness at the lead: the search matches the
+    exact best card 90-95% of the time from 2nd/3rd/4th seat but only ~60%
+    when leading, below the policy head. Spending exact solves on the
+    positions that are already fine is pure cost."""
+    tr = ReBeLTrainer(play_exact_frac=1.0, seed=3)
+    assert tr.play_exact_lead_only is True
+    rng = random.Random(0)
+    lead = _first_play_state(tr, rng, leading=True)
+    mid = _first_play_state(tr, rng, leading=False)
+    assert lead is not None and mid is not None
+    assert tr._use_exact_leaves(lead) is True
+    assert tr._use_exact_leaves(mid) is False
+
+
+def test_play_exact_all_positions_when_asked():
+    tr = ReBeLTrainer(play_exact_frac=1.0, play_exact_lead_only=False, seed=3)
+    rng = random.Random(0)
+    mid = _first_play_state(tr, rng, leading=False)
+    assert tr._use_exact_leaves(mid) is True
+
+
+def test_play_exact_off_by_default():
+    tr = ReBeLTrainer(seed=3)
+    assert tr.play_exact_frac == 0.0
+    rng = random.Random(0)
+    for leading in (True, False):
+        st = _first_play_state(tr, rng, leading=leading)
+        assert tr._use_exact_leaves(st) is False
+
+
+def test_play_exact_does_not_disturb_bidding_fractions():
+    """play_exact_frac must not leak into bid decisions -- they have their own
+    knob and a very different cost profile."""
+    tr = ReBeLTrainer(play_exact_frac=1.0, bid_exact_frac=0.0, seed=3)
+    st = tr._fresh_deal()                       # a BID_ROUND_1 state
+    assert tr._use_exact_leaves(st) is False
+
+
+def test_play_exact_solve_tags_its_samples():
+    tr = ReBeLTrainer(num_worlds=2, cfr_iterations=8, depth_limit=4,
+                      full_depth_cards=0, play_exact_frac=1.0, seed=1)
+    tr.self_play_hand()
+    play = [s for s in tr.buffer if s.cluster_key[0] in ("PLAY", "Play")]
+    assert play, "expected play samples"
+    tagged = [s for s in play if s.cluster_key[-1] == "exact"]
+    assert tagged, "leading play decisions should be exact-tagged"
+    assert all(s.supervise_policy for s in tagged)

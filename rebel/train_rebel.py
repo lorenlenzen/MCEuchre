@@ -248,6 +248,8 @@ class ReBeLTrainer:
                  bid_exact_frac: float = 0.0,
                  bid2_exact_frac: float = 0.0,
                  bid_exact_worlds: Optional[int] = None,
+                 play_exact_frac: float = 0.0,
+                 play_exact_lead_only: bool = True,
                  equity_model: Optional["MatchEquityModel"] = None,
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
@@ -345,6 +347,12 @@ class ReBeLTrainer:
         # costs a double-dummy solve rather than a slice of one batched
         # forward pass. None reuses num_worlds.
         self.bid_exact_worlds = bid_exact_worlds
+        # The same idea aimed at card play. See _use_exact_leaves for the
+        # measurement that says where: leading is the only play position the
+        # search handles badly (60% vs a 54% random baseline, against 90-95%
+        # elsewhere), and it is where the head currently beats the search.
+        self.play_exact_frac = play_exact_frac
+        self.play_exact_lead_only = play_exact_lead_only
         # None (default) preserves exact prior behavior throughout this
         # class: every deal starts 0-0, SubgameSolver gets no equity_model
         # (raw point-differential CFR targets, unchanged), and
@@ -547,15 +555,48 @@ class ReBeLTrainer:
         return batch_value_fn_from_net(self.net, perspective=actor)
 
     def _use_exact_leaves(self, state) -> bool:
-        """Should THIS solve value every leaf by exact double-dummy?"""
+        """Should THIS solve value every leaf by exact double-dummy?
+
+        For PLAY this is aimed rather than blanket, because measurement put
+        the weakness in one place. Scoring every legal card by double-dummy
+        over real play decisions: only ~18% have a genuine choice at all (in
+        the rest every legal card ties), and on those the search matches the
+        best card 90-95% of the time from second, third or fourth seat -- but
+        only 60% when LEADING, against a 54% random-legal baseline. Leading
+        is also where the policy head BEATS the search (69% vs 60%), the same
+        inversion that flagged the bidding bug: a search below the head is
+        manufacturing bad targets.
+
+        The cause is structural. Leading, every card is legal (widest
+        branching) and nothing in the current trick constrains the outcome,
+        so the value depends entirely on hidden hands -- and with
+        depth_limit 6 an opening lead searches about a trick and a half
+        before handing the rest to the value net. Exact leaves replace
+        precisely that handoff.
+
+        `play_exact_lead_only` restricts it to leads, which is where the
+        evidence is; the rest of the trick is already at 90-95% and would
+        just pay the cost. Decisions inside full_depth_cards never reach
+        here in practice -- _depth_for returns None for them, so the solve
+        runs to terminal and has no depth-limit leaves to value.
+        """
         if self.engine == "cpp":
             r1 = state.phase == self._cpp.Phase.BidRound1
             r2 = state.phase == self._cpp.Phase.BidRound2
+            is_play = state.phase == self._cpp.Phase.Play
+            leading = len(state.current_trick) == 0
         else:
             r1 = state.phase == Phase.BID_ROUND_1
             r2 = state.phase == Phase.BID_ROUND_2
-        frac = (self.bid_exact_frac if r1 else
-                self.bid2_exact_frac if r2 else 0.0)
+            is_play = state.phase == Phase.PLAY
+            leading = len(state.current_trick) == 0
+        if is_play:
+            if self.play_exact_lead_only and not leading:
+                return False
+            frac = self.play_exact_frac
+        else:
+            frac = (self.bid_exact_frac if r1 else
+                    self.bid2_exact_frac if r2 else 0.0)
         return frac > 0 and self.rng.random() < frac
 
     def _exact_leaf_fn(self):

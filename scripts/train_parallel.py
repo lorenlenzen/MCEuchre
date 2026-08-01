@@ -71,6 +71,40 @@ def _atomic_save(state_dict, path, retries=20, delay=0.5):
             time.sleep(delay)
 
 
+def _load_resumable_log(log_path):
+    """(log, elapsed_offset, samples_offset) for continuing an eval log at
+    `log_path`, or ([], 0, 0) if there's nothing usable to resume.
+
+    A log at this path might belong to a different script's schema --
+    train_scale.py's entries use "gen"/"hands", not this script's
+    "elapsed_s"/"samples" -- if --out was ever reused across scripts (or an
+    older/incompatible version of this one). Blindly trusting the last
+    entry's shape crashed here once already (KeyError on a
+    train_scale-produced log); a mismatch now starts fresh with a warning
+    instead of assuming the file on disk matches what this run is about to
+    write."""
+    if not os.path.exists(log_path):
+        return [], 0, 0
+    try:
+        existing = json.load(open(log_path))
+    except (json.JSONDecodeError, OSError):
+        return [], 0, 0
+    if not existing:
+        return [], 0, 0
+    if not all(k in existing[-1] for k in ("elapsed_s", "samples")):
+        print(f"warning: {log_path} exists but doesn't look like a "
+              f"train_parallel.py log (last entry keys: "
+              f"{sorted(existing[-1])}) -- starting a fresh log instead of "
+              f"resuming it. If this --out was previously used by "
+              f"train_scale.py or an older run, move or rename the old log "
+              f"if you want to keep it.", flush=True)
+        return [], 0, 0
+    print(f"resuming eval log from {log_path} ({len(existing)} entries, "
+          f"{existing[-1]['elapsed_s']}s / {existing[-1]['samples']} "
+          f"samples so far)", flush=True)
+    return existing, existing[-1]["elapsed_s"], existing[-1]["samples"]
+
+
 def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
     """Play hands forever, pushing samples; reload weights when the learner
     bumps the version."""
@@ -103,7 +137,10 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
         value_ground_frac=cfg["value_ground"],
         bid_exact_frac=cfg["bid_exact"], bid2_exact_frac=cfg["bid2_exact"],
-        bid_exact_worlds=cfg["bid_exact_worlds"], equity_model=equity_model,
+        bid_exact_worlds=cfg["bid_exact_worlds"],
+        play_exact_frac=cfg["play_exact"],
+        play_exact_lead_only=cfg["play_exact_lead_only"],
+        equity_model=equity_model,
         engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
     local_v = -1
@@ -207,6 +244,24 @@ def main():
                          "to --num-worlds). Lower is usually right: each leaf "
                          "costs a double-dummy solve rather than a slice of "
                          "one batched forward pass.")
+    ap.add_argument("--play-exact-frac", type=float, default=0.0,
+                    help="fraction of card-PLAY decisions solved with every "
+                         "leaf valued by exact double-dummy. Aimed, not "
+                         "blanket: scoring every legal card exactly over real "
+                         "play decisions, only ~18%% have a genuine choice at "
+                         "all, and on those the search picks the best card "
+                         "90-95%% of the time from 2nd/3rd/4th seat but only "
+                         "60%% when LEADING -- against a 54%% random-legal "
+                         "baseline, and below the policy head's 69%%. A search "
+                         "worse than the head is manufacturing bad targets, "
+                         "the same signature as the bidding bug. Off by "
+                         "default.")
+    ap.add_argument("--play-exact-all-positions", dest="play_exact_lead_only",
+                    action="store_false", default=True,
+                    help="apply --play-exact-frac at every position in the "
+                         "trick rather than leads only. Off by default "
+                         "because 2nd/3rd/4th are already at 90-95%% and "
+                         "would just pay the cost.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero state. Worth it after a change "
@@ -350,6 +405,8 @@ def main():
            "bid_exact": args.bid_exact_frac,
            "bid2_exact": args.bid2_exact_frac,
            "bid_exact_worlds": args.bid_exact_worlds,
+           "play_exact": args.play_exact_frac,
+           "play_exact_lead_only": args.play_exact_lead_only,
            "equity_table": equity_table_path,
            "engine": args.engine}
 
@@ -374,20 +431,7 @@ def main():
     # carrying its last elapsed_s/samples forward as an offset so the new
     # entries' x-axis stays continuous instead of jumping back to 0.
     log_path = args.out + ".log.json"
-    log = []
-    elapsed_offset = 0
-    samples_offset = 0
-    if os.path.exists(log_path):
-        try:
-            log = json.load(open(log_path))
-        except (json.JSONDecodeError, OSError):
-            log = []
-        if log:
-            elapsed_offset = log[-1]["elapsed_s"]
-            samples_offset = log[-1]["samples"]
-            print(f"resuming eval log from {log_path} "
-                  f"({len(log)} entries, {elapsed_offset}s / "
-                  f"{samples_offset} samples so far)", flush=True)
+    log, elapsed_offset, samples_offset = _load_resumable_log(log_path)
     # Accumulates new samples between training steps. Steps are taken at a
     # rate proportional to fresh data (samples_per_step) rather than a fixed
     # count every cycle -- at low actor throughput, a flat step count per
