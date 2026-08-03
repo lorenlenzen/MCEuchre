@@ -25,7 +25,6 @@ loop**, plus a **PIMC** search agent as a strong baseline.
 | `rebel/solver.py` | Exact double-dummy solver (alpha-beta + move reduction) | ✅ verified vs brute force |
 | `rebel/pimc.py` | PIMC search agent (sample worlds → solve → average) | ✅ tested |
 | `rebel/public_belief_state.py` | Void-aware determinization / belief sampling | ✅ tested |
-| `rebel/belief_model.py` | Belief refinement conditioned on the bidding | ✅ tested (sharpens maker's trump +0.76) |
 | `rebel/subgame.py` | Depth-limited CFR subgame solver (ReBeL's search core) | ✅ verified vs double-dummy |
 | `rebel/train_rebel.py` | The ReBeL self-play loop (search → targets → train net) | ✅ runs & learns |
 | `rebel/tmecor.py` | Correlated team play (TMECor) for small subgames | ✅ validated (correlation gap on a known game; TMECor ≥ Nash on Euchre) |

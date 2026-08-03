@@ -83,9 +83,7 @@ test_cpp_net_trains_via_rebel_trainer_and_checkpoint_interops`).
 
 **Engine selector**: `ReBeLTrainer(engine="cpp")` (`rebel/train_rebel.py`)
 routes the `self_play_hand()` hot loop -- state, observation, solver, CFR
-search -- through the C++ path. `belief_model` depends on Python-only code
-(`rebel/belief_model.py`) that wasn't ported, so `engine="cpp"` rejects it at
-construction rather than silently falling back to Python for it.
+search -- through the C++ path.
 `round2_seed_frac` and `value_ground_frac` both work fine with
 `engine="cpp"`: `_biased_deal` never calls `rollout_value`, it only needed
 engine-aware hand/up_card conversion (same pattern as `_cluster_key`); and

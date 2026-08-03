@@ -1,8 +1,8 @@
-"""Train the ReBeL loop at scale with belief refinement on, tracking strength.
+"""Train the ReBeL loop at scale, tracking strength.
 
-Runs self-play with the bidding-conditioned belief model, and every few
-generations evaluates the (inference-only) net agent against the baselines so
-we get a learning curve. Checkpoints the net and a JSON log.
+Runs self-play, and every few generations evaluates the (inference-only) net
+agent against the baselines so we get a learning curve. Checkpoints the net
+and a JSON log.
 
     python scripts/train_scale.py --generations 40 --hands-per-gen 25
 """
@@ -16,7 +16,6 @@ import time
 import torch
 
 from rebel.train_rebel import ReBeLTrainer, ReBeLNetAgent
-from rebel.belief_model import BiddingBeliefModel
 from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
 from rebel.match_equity import MatchEquityModel
 
@@ -108,7 +107,6 @@ def main() -> None:
                          "built first: python setup.py build_ext --inplace), "
                          "differentially verified bit-for-bit against the "
                          "Python path in tests/test_cpp_equivalence.py. "
-                         "Drops belief_model reweighting (not ported). "
                          "--value-ground-frac and --round2-seed-frac both "
                          "work fine with --engine cpp -- value_ground_frac's "
                          "cpp path uses cpp_rollout_value "
@@ -133,12 +131,6 @@ def main() -> None:
     else:
         print("match equity: off (--no-match-equity)")
 
-    # cpp.SubgameSolver's production constructor only supports uniform
-    # sample_determinization (see rebel/train_rebel.py's ReBeLTrainer
-    # engine='cpp' guard) -- belief_model reweighting isn't ported, so it's
-    # dropped rather than erroring when --engine cpp is chosen.
-    belief_model = BiddingBeliefModel() if args.engine == "python" else None
-
     trainer = ReBeLTrainer(
         num_worlds=args.num_worlds, cfr_iterations=args.cfr_iters,
         depth_limit=args.depth_limit,
@@ -153,7 +145,7 @@ def main() -> None:
         play_exact_frac=args.play_exact_frac,
         play_exact_lead_only=args.play_exact_lead_only,
         play_exact_worlds=args.play_exact_worlds,
-        belief_model=belief_model, engine=args.engine, lr=1e-3, seed=0)
+        engine=args.engine, lr=1e-3, seed=0)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")

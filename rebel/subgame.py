@@ -3,10 +3,10 @@
 This is the search core of ReBeL. Given the state a player must act from, we:
 
 1. Build a **belief** as a set of determinizations -- full deals consistent
-   with what the acting player knows (their hand fixed, opponents sampled).
-   Fixing the actor's hand guarantees the actor's real information set is in
-   the support, so the resolved strategy is defined for the move we actually
-   face. (A learned belief net will replace the uniform sampler later.)
+   with what the acting player knows (their hand fixed, opponents sampled
+   uniformly). Fixing the actor's hand guarantees the actor's real
+   information set is in the support, so the resolved strategy is defined
+   for the move we actually face.
 2. Treat "nature picks one of these worlds" as a chance node and run vanilla
    CFR over the resulting extensive game, sharing regret across worlds through
    information-set keys -- so a player's strategy is tied together exactly
@@ -102,7 +102,6 @@ class SubgameSolver:
                  depth_limit: Optional[int] = None,
                  value_fn: Optional[ValueFn] = None,
                  batch_value_fn: Optional[BatchValueFn] = None,
-                 belief_model=None,
                  equity_model: Optional["MatchEquityModel"] = None,
                  rng: Optional[random.Random] = None) -> None:
         if root.is_terminal() or root.current_player != actor:
@@ -123,15 +122,9 @@ class SubgameSolver:
         self.dealer_is_team0 = team_of(root.dealer) == 0
         self.rng = rng or random.Random()
         self.infosets: Dict[str, _Info] = {}
-        if belief_model is not None:
-            # Reweight the belief by how well each deal explains the bidding.
-            from .belief_model import sample_weighted_belief
-            self.worlds, self.weights = sample_weighted_belief(
-                root, actor, num_worlds, belief_model, self.rng)
-        else:
-            self.worlds = [sample_determinization(root, actor, self.rng)
-                           for _ in range(num_worlds)]
-            self.weights = [1.0 / num_worlds] * num_worlds
+        self.worlds = [sample_determinization(root, actor, self.rng)
+                       for _ in range(num_worlds)]
+        self.weights = [1.0 / num_worlds] * num_worlds
         self.root_phase = root.phase
         self.root_key = infoset_key(root, actor)
         self.roots: Optional[List[_TNode]] = None
@@ -364,14 +357,13 @@ class CFRSearchAgent:
                  value_fn: Optional[ValueFn] = None,
                  batch_value_fn: Optional[BatchValueFn] = None,
                  batch_value_fn_factory=None,
-                 belief_model=None, greedy: bool = True, seed: int = 0) -> None:
+                 greedy: bool = True, seed: int = 0) -> None:
         self.num_worlds = num_worlds
         self.iterations = iterations
         self.depth_limit = depth_limit
         self.value_fn = value_fn
         self.batch_value_fn = batch_value_fn
         self.batch_value_fn_factory = batch_value_fn_factory
-        self.belief_model = belief_model
         self.greedy = greedy
         self._rng = random.Random(seed)
 
@@ -387,7 +379,7 @@ class CFRSearchAgent:
             state, actor, num_worlds=self.num_worlds,
             iterations=self.iterations, depth_limit=self.depth_limit,
             value_fn=self.value_fn, batch_value_fn=bvf,
-            belief_model=self.belief_model, rng=self._rng)
+            rng=self._rng)
         solver.run()
         policy = solver.root_policy()
         actions = list(policy)

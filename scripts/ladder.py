@@ -16,7 +16,6 @@ from rebel.evaluate import (
 )
 from rebel.mccfr import MCCFRTrainer
 from rebel.pimc import PIMCAgent
-from rebel.belief_model import BiddingBeliefModel
 
 
 def main() -> None:
@@ -42,10 +41,6 @@ def main() -> None:
     if args.pimc:
         specs.append(AgentSpec(
             "pimc", lambda: PIMCAgent(worlds=8, call_worlds=4)))
-        specs.append(AgentSpec(
-            "pimc+belief", lambda: PIMCAgent(
-                worlds=8, call_worlds=4,
-                belief_model=BiddingBeliefModel())))
 
     print(f"Round robin: {len(specs)} agents, {args.hands} hands/pair "
           f"({len(specs) * (len(specs) - 1) // 2} pairings)")

@@ -239,7 +239,7 @@ class ReBeLTrainer:
     def __init__(self, net: Optional[PolicyValueNet] = None,
                  depth_limit: int = 4, num_worlds: int = 8,
                  cfr_iterations: int = 20, lr: float = 1e-3,
-                 buffer_size: int = 20000, belief_model=None,
+                 buffer_size: int = 20000,
                  full_depth_cards: int = 0, seed: int = 0,
                  stick_the_dealer: bool = False,
                  grad_clip_norm: float = 5.0,
@@ -255,11 +255,6 @@ class ReBeLTrainer:
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
             raise ValueError(f"engine must be 'python' or 'cpp', got {engine!r}")
-        if engine == "cpp" and belief_model is not None:
-            # cpp.SubgameSolver's production constructor only supports
-            # uniform sample_determinization, not belief_model reweighting
-            # (rebel/belief_model.py isn't ported).
-            raise ValueError("belief_model requires engine='python'")
         self.engine = engine
         self._cpp = _cpp_module() if engine == "cpp" else None
         # A cpp.MatchEquityModel mirror of `equity_model` (built once, not
@@ -381,7 +376,6 @@ class ReBeLTrainer:
         self.cfr_iterations = cfr_iterations
         self.buffer: List[Sample] = []
         self.buffer_size = buffer_size
-        self.belief_model = belief_model
         # Prioritized replay, grouped by cluster key instead of per sample:
         # far less state to track (a few dozen hand-strength buckets, not one
         # priority per buffer entry), and a fresh sample in a weak bucket
@@ -1056,7 +1050,7 @@ class ReBeLTrainer:
                     state, actor, num_worlds=worlds,
                     iterations=self.cfr_iterations, depth_limit=self._depth_for(state),
                     batch_value_fn=leaf_fn,
-                    belief_model=self.belief_model, equity_model=self.equity_model,
+                    equity_model=self.equity_model,
                     rng=self.rng)
             solver.run()
             policy = solver.root_policy()

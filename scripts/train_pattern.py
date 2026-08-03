@@ -51,7 +51,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from quiz_eval import build_state_any, score_net  # noqa: E402
 
 from euchre.actions import NUM_ACTIONS, Pass, action_to_index  # noqa: E402
-from euchre.cards import Card, Rank, Suit, effective_suit  # noqa: E402
+from euchre.cards import (Card, Rank, Suit, SUITS, effective_suit,  # noqa: E402
+                          same_color_suit)
 from euchre.game import EuchreState, Phase, team_of  # noqa: E402
 from euchre.infoset import observation_tensor  # noqa: E402
 from rebel.match_equity import MatchEquityModel  # noqa: E402
@@ -89,37 +90,73 @@ def cluster_of_quiz_question(trainer, quiz_path, qid):
 
 _RANKS = {"9": Rank.NINE, "T": Rank.TEN, "J": Rank.JACK, "Q": Rank.QUEEN,
           "K": Rank.KING, "A": Rank.ACE}
-_SUITS = {"C": Suit.CLUBS, "D": Suit.DIAMONDS, "H": Suit.HEARTS,
-          "S": Suit.SPADES}
+# The four suit-relative labels a --require token's suit half can use,
+# instead of an absolute suit -- the net is suit-agnostic (see this module's
+# docstring), so a structural pattern like "right + left bower" should be
+# expressible without pinning it to a physical suit. U is the up-card's own
+# suit; N is the other suit of the same color (holds the left bower); G/g are
+# the two off-color suits, kept distinct (rather than one shared letter) so a
+# pattern can ask for one card from each. Case matters only for G vs g.
+_RELSUITS = ("U", "N", "G", "g")
 _ALL_CARDS = [Card(s, r) for s in Suit for r in Rank]
 
 
 def parse_require(text):
-    """"JS,J*,*S" -> a list of candidate-card sets, one per pattern.
+    """"JU,J*,*g" -> a list of (token, rank_char, relsuit_char) patterns.
 
-    Each token is <rank><suit>, either half of which may be `*`: `JS` is
-    exactly the jack of spades, `J*` any jack, `*S` any spade, `**` any card.
-    Patterns must match DISTINCT cards, so `J*,J*` means two different jacks.
+    Each token is <rank><relsuit>, either half of which may be `*`: `JU` is
+    the jack of the up-card's suit (the right bower), `J*` any jack, `*g` any
+    card of the second off-color suit, `**` any card. Patterns must match
+    DISTINCT cards, so `J*,J*` means two different jacks. Suits are resolved
+    to physical cards per-deal by ``_relsuit_map`` once the up-card's suit is
+    chosen, since U/N/G/g name a role relative to the up-card, not a fixed
+    suit.
     """
     out = []
-    for tok in (t.strip().upper() for t in text.split(",") if t.strip()):
-        if len(tok) != 2:
-            raise ValueError(f"--require token {tok!r} must be 2 characters "
-                             f"(<rank><suit>), e.g. JS, J*, *S, **")
-        r, s = tok
+    for raw in (t.strip() for t in text.split(",") if t.strip()):
+        if len(raw) != 2:
+            raise ValueError(f"--require token {raw!r} must be 2 characters "
+                             f"(<rank><relsuit>), e.g. JU, J*, *g, **")
+        r, s = raw[0].upper(), raw[1]
         if r != "*" and r not in _RANKS:
-            raise ValueError(f"bad rank {r!r} in {tok!r}; use one of "
+            raise ValueError(f"bad rank {r!r} in {raw!r}; use one of "
                              f"{''.join(_RANKS)} or *")
-        if s != "*" and s not in _SUITS:
-            raise ValueError(f"bad suit {s!r} in {tok!r}; use one of "
-                             f"{''.join(_SUITS)} or *")
-        cands = [c for c in _ALL_CARDS
-                 if (r == "*" or c.rank == _RANKS[r])
-                 and (s == "*" or c.suit == _SUITS[s])]
-        out.append((tok, cands))
+        if s.upper() in ("U", "N"):
+            s = s.upper()
+        elif s not in ("G", "g", "*"):
+            raise ValueError(f"bad suit {s!r} in {raw!r}; use one of "
+                             f"U, N, G, g or *")
+        out.append((f"{r}{s}", r, s))
     if len(out) > 5:
         raise ValueError(f"--require has {len(out)} patterns but a hand holds "
                          f"only 5 cards")
+    return out
+
+
+def relsuit_map(up_suit, rng):
+    """Map U/N/G/g to physical suits for one deal, given the up-card's suit.
+
+    U is the up-card's suit and N (same color, holds the left bower) follows
+    from it deterministically; the two off-color suits are functionally
+    interchangeable, so which one is G vs g is randomized per deal rather
+    than fixed, so a pattern using both (e.g. one green ace each) doesn't
+    always land on the same physical pair of suits.
+    """
+    next_suit = same_color_suit(up_suit)
+    greens = [s for s in SUITS if s not in (up_suit, next_suit)]
+    rng.shuffle(greens)
+    return {"U": up_suit, "N": next_suit, "G": greens[0], "g": greens[1]}
+
+
+def resolve_patterns(patterns, suit_map):
+    """[(tok, rank_char, relsuit_char), ...] -> [(tok, candidate_cards), ...]
+    for one deal's concrete U/N/G/g -> suit assignment."""
+    out = []
+    for tok, r, s in patterns:
+        cands = [c for c in _ALL_CARDS
+                 if (r == "*" or c.rank == _RANKS[r])
+                 and (s == "*" or c.suit == suit_map[s])]
+        out.append((tok, cands))
     return out
 
 
@@ -144,27 +181,6 @@ def choose_required(patterns, rng, attempts=20):
     return None
 
 
-def parse_voids(text):
-    """"up" or a suit letter, comma-separated -> a list of void specs.
-
-    `up` means the up-card's own suit, which is the one that matters for a
-    round-1 decision: void there means ordering up leaves you with ZERO
-    trump. Voids are evaluated by EFFECTIVE suit with the up-card's suit as
-    trump, so a void in `up` correctly excludes the left bower too -- it is a
-    trump void, not merely an absence of that printed suit.
-    """
-    out = []
-    for tok in (t.strip().upper() for t in text.split(",") if t.strip()):
-        if tok in ("UP", "TRUMP"):
-            out.append("up")
-        elif tok in _SUITS:
-            out.append(tok)
-        else:
-            raise ValueError(f"--void token {tok!r} must be 'up' or one of "
-                             f"{''.join(_SUITS)}")
-    return out
-
-
 def parse_score(text):
     """"9,6" -> (9, 6), read as (my score, their score) from the ACTING
     player's side, not team0's."""
@@ -175,48 +191,83 @@ def parse_score(text):
     return int(parts[0]), int(parts[1])
 
 
-def _forbidden_for_voids(voids, up):
-    """Cards the acting hand may not hold, given the up-card."""
+def parse_up_rank(text):
+    """"J" or "T,J,Q" -> a set of Ranks the up card is allowed to be.
+
+    The up card's suit is always U (--require's relative suits are defined
+    relative to it); this pins its rank the same way --require pins hand
+    cards. Comma-separated for a set rather than one rank so e.g. "any
+    bower-adjacent up-card" (T,J,Q) is expressible.
+    """
     out = set()
-    for v in voids:
-        suit = up.suit if v == "up" else _SUITS[v]
-        out |= {c for c in _ALL_CARDS if effective_suit(c, up.suit) == suit}
+    for tok in (t.strip().upper() for t in text.split(",") if t.strip()):
+        if tok not in _RANKS:
+            raise ValueError(f"--up-rank token {tok!r} must be one of "
+                             f"{''.join(_RANKS)}")
+        out.add(_RANKS[tok])
     return out
 
 
-def constrained_deal(trainer, patterns, phase, rng, voids=(), score=None):
+def _forbidden_for_void_up(up):
+    """Cards the acting hand may not hold, to be void in the up-card's suit.
+
+    The only void that matters for a round-1 decision: void there means
+    ordering up leaves you with ZERO trump. Evaluated by EFFECTIVE suit with
+    the up-card's suit as trump, so it excludes the left bower too -- it is a
+    trump void, not merely an absence of that printed suit.
+    """
+    return {c for c in _ALL_CARDS if effective_suit(c, up.suit) == up.suit}
+
+
+def constrained_deal(trainer, patterns, phase, rng, void_up=False, score=None,
+                     up_ranks=None):
     """A deal in which the seat about to act holds a card for every pattern,
-    is void where asked, and (optionally) faces a pinned match score.
+    is void in the up-card's suit if asked, and (optionally) faces a pinned
+    match score.
 
     Placed rather than waited for: rejection-sampling a tight structural
     pattern is hopeless at this scale -- all four jacks is 0.047% of hands per
     seat, ~640,000 draws for 300 samples -- and it also isn't what you want,
     since every accepted deal would still be one arbitrary deal. Here the
     constrained parts are fixed and *everything else* varies: the rest of the
-    hand, the up-card, the dealer, all three opponents' hands, and the score
-    unless pinned. Returns (state, passes_to_apply), or None if the draw
-    failed.
+    hand, the up-card's rank (unless --up-rank pins it), the dealer, all
+    three opponents' hands, and the score unless pinned. Returns
+    (state, passes_to_apply), or None if the draw failed.
 
-    The up-card is drawn BEFORE the hand is filled, because `--void up` is
-    defined relative to it. Retries a bounded number of times rather than
-    looping forever: some combinations are simply unsatisfiable (five cards
-    void in `up` when the required cards include a club, say), and the caller
-    counts failures against --max-tries.
+    `patterns` uses --require's U/N/G/g relative suits, which name a role
+    relative to the up-card rather than a fixed suit -- so, unlike the old
+    absolute-suit scheme, the up-card's own SUIT has to be chosen before the
+    patterns can be resolved to physical cards at all (its rank is drawn
+    after, same as before, from `up_ranks` or any rank not already placed).
+    That suit choice is retried along with everything else: a bad one (e.g.
+    --up-rank exhausted by --require cards of that same suit) is a property
+    of the whole draw, not something fixable in place. Retries a bounded
+    number of times rather than looping forever; the caller counts failures
+    against --max-tries.
     """
-    required = choose_required(patterns, rng) if patterns else []
-    if required is None:
-        return None
     passes = rng.randint(0, 3) if phase == "bid1" else 4 + rng.randint(0, 3)
     actor = rng.randint(0, 3)
     # Seat the dealer so `actor` is the one to act after exactly `passes`
     # passes: bidding opens at dealer+1 and round 2 reopens there too.
     dealer = (actor - 1 - passes) % 4
 
-    req = set(required)
     hands = up = kitty = None
     for _ in range(40):
-        cand_up = rng.choice([c for c in _ALL_CARDS if c not in req])
-        forbidden = _forbidden_for_voids(voids, cand_up) if voids else set()
+        up_suit = rng.choice(SUITS)
+        suit_map = relsuit_map(up_suit, rng)
+        resolved = resolve_patterns(patterns, suit_map) if patterns else []
+        required = choose_required(resolved, rng) if resolved else []
+        if required is None:
+            continue
+        req = set(required)
+
+        rank_pool = [rk for rk in (up_ranks if up_ranks else list(_RANKS.values()))
+                    if Card(up_suit, rk) not in req]
+        if not rank_pool:
+            continue                      # --up-rank exhausted by --require
+        cand_up = Card(up_suit, rng.choice(rank_pool))
+
+        forbidden = _forbidden_for_void_up(cand_up) if void_up else set()
         if req & forbidden:
             continue                      # required card violates the void
         pool = [c for c in _ALL_CARDS if c != cand_up and c not in req]
@@ -308,7 +359,8 @@ def walk_to_phase(trainer, state, phase, rng):
 
 
 def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
-             patterns=None, phase="bid1", voids=(), score=None):
+             patterns=None, phase="bid1", void_up=False, score=None,
+             up_ranks=None):
     """n exact-leaf-solved Samples matching the requested pattern.
 
     Two selection modes. `cluster` rejection-samples until the deal lands in a
@@ -323,7 +375,8 @@ def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
         tries += 1
         if patterns is not None:
             drawn = constrained_deal(trainer, patterns, phase, rng,
-                                     voids=voids, score=score)
+                                     void_up=void_up, score=score,
+                                     up_ranks=up_ranks)
             if drawn is None:
                 continue
             state = apply_passes(trainer, *drawn)
@@ -410,30 +463,43 @@ def main():
                          "to --quiz-id)")
     ap.add_argument("--require", type=str, default=None,
                     help="target a STRUCTURAL pattern instead of a strength "
-                         "bucket: a comma-separated list of <rank><suit> "
+                         "bucket: a comma-separated list of <rank><relsuit> "
                          "tokens the acting hand must contain, either half "
-                         "of which may be '*'. JS = that exact card, J* = "
-                         "any jack, *S = any spade, ** = any card; repeats "
-                         "must match distinct cards, so 'J*,J*' is two "
-                         "different jacks. Use this when the thing you want "
-                         "isn't a cluster at all -- all four jacks spreads "
-                         "across buckets 5-8 depending on the up-card suit, "
-                         "and at 0.047%% of hands per seat no amount of "
-                         "rejection sampling will find them. The required "
-                         "cards are placed; the rest of the hand, the "
-                         "up-card, the dealer, the score and all three "
-                         "opponents' hands still vary.")
+                         "of which may be '*'. Suits are relative to the "
+                         "up-card, not physical, since the net is "
+                         "suit-agnostic: U = the up-card's own suit, N = the "
+                         "other suit of the same color (holds the left "
+                         "bower), G/g = the two off-color suits (kept "
+                         "distinct so a pattern can ask for one from each). "
+                         "JU = the right bower, J* = any jack, *g = any card "
+                         "of the second off-color suit, ** = any card; "
+                         "repeats must match distinct cards, so 'J*,J*' is "
+                         "two different jacks. Use this when the thing you "
+                         "want isn't a cluster at all -- all four jacks "
+                         "spreads across buckets 5-8 depending on the "
+                         "up-card suit, and at 0.047%% of hands per seat no "
+                         "amount of rejection sampling will find them. The "
+                         "required cards are placed; the rest of the hand, "
+                         "the up-card's rank (--up-rank to pin it), the "
+                         "dealer, the score and all three opponents' hands "
+                         "still vary.")
+    ap.add_argument("--up-rank", type=str, default=None,
+                    help="pin the up card's rank: a rank letter or "
+                         "comma-separated set, e.g. 'J' or 'T,J,Q'. Needs "
+                         "--require (its U/N/G/g suits fix the up-card's "
+                         "suit; this fixes its rank the same way --require "
+                         "fixes hand cards). Without it the rank is any "
+                         "rank not already placed by --require.")
     ap.add_argument("--phase", choices=["bid1", "bid2"], default="bid1",
                     help="which decision to solve, for --require (with "
                          "--quiz-id/--cluster the phase comes from those).")
-    ap.add_argument("--void", type=str, default=None,
-                    help="suits the acting hand must be VOID in: 'up' for the "
-                         "up-card's suit, or a suit letter, comma-separated. "
-                         "'up' is the useful one -- it means ordering up "
-                         "leaves you with zero trump. Evaluated by effective "
-                         "suit, so it excludes the left bower too rather than "
-                         "just the printed suit. Combines with --require; use "
-                         "--require '**' if you only want a void.")
+    ap.add_argument("--void-up", action="store_true",
+                    help="the acting hand must be VOID in the up-card's "
+                         "suit -- ordering up would leave zero trump. "
+                         "Evaluated by effective suit, so it excludes the "
+                         "left bower too rather than just the printed suit. "
+                         "Combines with --require; use --require '**' if "
+                         "you only want a void.")
     ap.add_argument("--score", type=str, default=None,
                     help="pin the match score as MINE,THEIRS from the acting "
                          "player's side, e.g. '9,6'. Without this the score "
@@ -474,11 +540,13 @@ def main():
     if len(given) != 1:
         raise SystemExit("give exactly one of --quiz-id, --cluster or "
                          f"--require (got {given or 'none'})")
-    # --void and --score place cards / fix the score at deal time, which only
-    # the --require constructor does; cluster selection reaches its positions
-    # by rejection sampling and has no way to impose either.
-    for flag, val in (("--void", args.void), ("--score", args.score)):
-        if val is not None and args.require is None:
+    # --void-up, --score and --up-rank place cards / fix state at deal time,
+    # which only the --require constructor does; cluster selection reaches
+    # its positions by rejection sampling and has no way to impose any of
+    # them.
+    for flag, val in (("--void-up", args.void_up), ("--score", args.score),
+                      ("--up-rank", args.up_rank)):
+        if val and args.require is None:
             raise SystemExit(f"{flag} needs --require (it constrains how the "
                              f"deal is BUILT; --quiz-id/--cluster sample "
                              f"existing deals instead). Use --require '**' if "
@@ -499,8 +567,8 @@ def main():
                            depth_limit=args.depth_limit, seed=args.seed)
     rng = random.Random(args.seed + 1)
     patterns, cluster = None, None
-    voids = parse_voids(args.void) if args.void else ()
     score = parse_score(args.score) if args.score else None
+    up_ranks = parse_up_rank(args.up_rank) if args.up_rank else None
     if score is not None:
         target = getattr(equity_model, "target", 10) or 10
         if max(score) >= target:
@@ -510,16 +578,22 @@ def main():
         patterns = parse_require(args.require)
         # Fail loudly and immediately on an impossible ask ("J*" five times --
         # there are only four jacks) rather than spinning to --max-tries and
-        # reporting an empty result that looks like bad luck.
-        if choose_required(patterns, rng) is None:
+        # reporting an empty result that looks like bad luck. Any fixed
+        # up-suit works for this check: each U/N/G/g letter always names
+        # exactly one physical suit (6 cards) regardless of which one, so
+        # feasibility doesn't depend on the actual per-deal assignment.
+        canonical_map = relsuit_map(Suit.CLUBS, random.Random(0))
+        if choose_required(resolve_patterns(patterns, canonical_map), rng) is None:
             raise SystemExit(
                 f"--require {args.require!r} can't be satisfied: no five "
                 f"distinct cards match those patterns simultaneously")
-        desc = f"{args.phase} hands containing {', '.join(t for t, _ in patterns)}"
-        if voids:
-            desc += f", void in {'/'.join(voids)}"
+        desc = f"{args.phase} hands containing {', '.join(t for t, _, _ in patterns)}"
+        if args.void_up:
+            desc += ", void in up"
         if score is not None:
             desc += f", at {score[0]}-{score[1]}"
+        if up_ranks:
+            desc += f", up-card rank in {{{','.join(r.symbol for r in up_ranks)}}}"
         print(f"pattern: {desc}", flush=True)
     elif args.quiz_id is not None:
         cluster, q = cluster_of_quiz_question(trainer, args.quiz, args.quiz_id)
@@ -534,8 +608,8 @@ def main():
           f"(engine={args.engine}, worlds={args.exact_worlds})...", flush=True)
     samples, tries = generate(trainer, cluster, args.samples, args.exact_worlds,
                               args.cfr_iters, args.max_tries, rng,
-                              patterns=patterns, phase=phase, voids=voids,
-                              score=score)
+                              patterns=patterns, phase=phase, void_up=args.void_up,
+                              score=score, up_ranks=up_ranks)
     if not samples:
         raise SystemExit(f"no usable deals in {tries} tries -- "
                          + ("stick-the-dealer may be blocking the passes "

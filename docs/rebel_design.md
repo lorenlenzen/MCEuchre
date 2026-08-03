@@ -149,17 +149,6 @@ C/Cython), a mechanical multiplier on top of the structural fixes above.
 
 Implemented:
 
-* **Belief refinement conditioned on the bidding** (`rebel/belief_model.py`).
-  The uniform determinizer ignores what the *bidding* revealed; a player who
-  ordered up or called a suit almost certainly holds strong trump. A monotonic
-  soft model of calling behaviour reweights each sampled deal by how well it
-  explains the observed bids (order-ups, passes, and going alone), and the
-  weights flow into the CFR chance-reach and PIMC averaging. Verified to
-  sharpen the belief in the right direction: across sampled positions the
-  maker's reconstructed hand carries **+0.76** more trump strength under the
-  weighted belief than under the uniform one (higher in 100% of positions).
-  Opt-in via a `belief_model` argument on `PIMCAgent`, `SubgameSolver`,
-  `CFRSearchAgent`, and `ReBeLTrainer`.
 * **Separate calling / play network heads** (`PolicyValueNet`). The flat action
   space splits into card plays `[0,24)` and bidding/discard `[24,59)`, each with
   its own output head so the two very different decision types specialise.
@@ -389,8 +378,8 @@ regenerating/retraining under this milestone.
 * **Speed:** already largely addressed (persistent CFR tree, batched leaf
   evaluation, arithmetic `Card.id`); the remaining lever is compiling the
   engine hot paths (see the performance section above).
-* Ablations to run on the ladder: depth limit, CFR iterations, belief model
-  on/off, self-play population.
+* Ablations to run on the ladder: depth limit, CFR iterations, self-play
+  population.
 
 ### Known gaps (not yet scheduled)
 

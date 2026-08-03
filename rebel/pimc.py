@@ -13,9 +13,9 @@ than late (nearly free). So the strongest *practical* configuration uses a
 per-decision **time budget** (``play_budget`` / ``call_budget``): keep sampling
 and solving worlds until the budget runs out. That spends the search where it
 is cheap -- hundreds of worlds late, a few dozen on the first trick -- for the
-best play at a fixed latency. ``strong_pimc()`` is the ready-made preset
-(belief refinement on, budgeted search). Set a fixed ``worlds`` count instead
-for reproducible behaviour (used in tests).
+best play at a fixed latency. ``strong_pimc()`` is the ready-made
+budgeted-search preset. Set a fixed ``worlds`` count instead for reproducible
+behaviour (used in tests).
 
 Known limitation (documented, not hidden): PIMC assumes perfect information
 *within* each world, so it cannot reason about its own future information
@@ -25,7 +25,6 @@ ReBeL subgame solver address this; PIMC remains an excellent baseline.
 
 from __future__ import annotations
 
-import math
 import random
 import time
 from typing import TYPE_CHECKING, Dict, List, Optional
@@ -137,7 +136,7 @@ class PIMCAgent:
     """
 
     def __init__(self, worlds: int = 20, call_worlds: int = 10,
-                 call_threshold: float = 0.4, belief_model=None,
+                 call_threshold: float = 0.4,
                  play_budget: Optional[float] = None,
                  call_budget: Optional[float] = None,
                  min_worlds: int = 8, max_worlds: int = 400,
@@ -145,7 +144,6 @@ class PIMCAgent:
         self.worlds = worlds
         self.call_worlds = call_worlds
         self.call_threshold = call_threshold
-        self.belief_model = belief_model
         # When a *_budget (seconds) is set, keep sampling and solving worlds
         # until the budget runs out (bounded by [min_worlds, max_worlds]). This
         # spends the search where it is cheap -- many worlds late in the hand,
@@ -174,15 +172,9 @@ class PIMCAgent:
     def _weighted_totals(self, state: EuchreState, actor: int,
                          actions: List[Action], team: int) -> Dict[Action, float]:
         """Sample worlds (fixed count or within ``play_budget``), solve each
-        action in each world, and return the belief-weighted total value per
-        action. Belief weights condition on the bidding when a model is set."""
-        model = self.belief_model
-        bids = None
-        if model is not None:
-            from .belief_model import reconstruct_bids
-            bids = reconstruct_bids(state)
-
-        collected: List[tuple] = []  # (log_weight, {action: value})
+        action in each world, and return the total value per action, averaged
+        uniformly across sampled worlds."""
+        collected: List[Dict[Action, float]] = []
         budget = self.play_budget
         deadline = time.time() + budget if budget is not None else None
         n = 0
@@ -191,13 +183,7 @@ class PIMCAgent:
             memo: dict = {}  # shared across sibling actions in this world
             vals = {a: _team_sign(solve_value(world.apply(a), memo), team)
                     for a in actions}
-            log_w = 0.0
-            if model is not None and bids:
-                from .belief_model import (
-                    reconstruct_original_hands, deal_log_weight)
-                log_w = deal_log_weight(reconstruct_original_hands(world), bids,
-                                        model, state.alone, state.dealer)
-            collected.append((log_w, vals))
+            collected.append(vals)
             n += 1
             if deadline is not None:
                 if n >= self.min_worlds and (time.time() >= deadline
@@ -206,12 +192,10 @@ class PIMCAgent:
             elif n >= self.worlds:
                 break
 
-        m = max(lw for lw, _ in collected)
         totals: Dict[Action, float] = {a: 0.0 for a in actions}
-        for log_w, vals in collected:
-            w = math.exp(log_w - m)
+        for vals in collected:
             for a in actions:
-                totals[a] += w * vals[a]
+                totals[a] += vals[a]
         return totals
 
     def _act_play(self, state: EuchreState) -> Action:
@@ -275,13 +259,11 @@ class PIMCAgent:
 
 def strong_pimc(play_budget: float = 5.0, call_budget: float = 4.0,
                 seed: int = 0) -> PIMCAgent:
-    """The strongest reasonable PIMC preset: bidding-conditioned belief on, and
-    time-budgeted search that uses as many determinizations as each decision
-    affords (many late in the hand where solves are cheap, fewer on the
-    expensive first trick). Tune the budgets to trade latency for strength.
+    """The strongest reasonable PIMC preset: time-budgeted search that uses as
+    many determinizations as each decision affords (many late in the hand
+    where solves are cheap, fewer on the expensive first trick). Tune the
+    budgets to trade latency for strength.
     """
-    from .belief_model import BiddingBeliefModel
     return PIMCAgent(
-        belief_model=BiddingBeliefModel(),
         play_budget=play_budget, call_budget=call_budget,
         min_worlds=12, max_worlds=400, call_threshold=0.4, seed=seed)

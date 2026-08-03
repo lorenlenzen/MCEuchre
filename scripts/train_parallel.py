@@ -112,7 +112,6 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
     torch.set_num_threads(1)
     from rebel.train_rebel import ReBeLTrainer
     from rebel.networks import PolicyValueNet
-    from rebel.belief_model import BiddingBeliefModel
 
     # Each actor loads its own MatchEquityModel from the shared path rather
     # than the parent constructing one and pickling it across the process
@@ -124,16 +123,11 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         equity_model = MatchEquityModel.load(cfg["equity_table"])
 
     engine = cfg.get("engine", "python")
-    # cpp.SubgameSolver's production constructor only supports uniform
-    # sample_determinization (see rebel/train_rebel.py's ReBeLTrainer
-    # engine='cpp' guard) -- belief_model reweighting isn't ported, so it's
-    # silently dropped rather than erroring when --engine cpp is chosen.
-    belief_model = BiddingBeliefModel() if engine == "python" else None
 
     t = ReBeLTrainer(
         net=PolicyValueNet(), num_worlds=cfg["worlds"],
         cfr_iterations=cfg["iters"], depth_limit=cfg["depth"],
-        full_depth_cards=cfg["fdc"], belief_model=belief_model,
+        full_depth_cards=cfg["fdc"],
         stick_the_dealer=cfg["stick"], round2_seed_frac=cfg["round2_seed"],
         value_ground_frac=cfg["value_ground"],
         bid_exact_frac=cfg["bid_exact"], bid2_exact_frac=cfg["bid2_exact"],
@@ -354,8 +348,7 @@ def main():
                          "for the engine/observation/solver/CFR-search hot "
                          "loop -- differentially verified bit-for-bit "
                          "against the Python path in "
-                         "tests/test_cpp_equivalence.py. Drops belief_model "
-                         "reweighting (not ported). --value-ground-frac and "
+                         "tests/test_cpp_equivalence.py. --value-ground-frac and "
                          "--round2-seed-frac both work fine with --engine "
                          "cpp -- value_ground_frac's cpp path uses "
                          "cpp_rollout_value (rebel/train_rebel.py), a "

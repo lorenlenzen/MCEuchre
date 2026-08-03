@@ -93,12 +93,10 @@ def test_net_agent_plays_legally():
 # --- engine="cpp" selector (Task 54): not a differential test against the
 # Python path (world sampling isn't required to match, see cpp/belief.cpp's
 # docstring) -- these confirm the C++ self-play hot path actually runs
-# end-to-end and produces well-formed samples/training updates, and that the
-# one remaining documented incompatibility (belief_model, which depends on
-# rebel/belief_model.py, itself un-ported) is rejected up front rather than
-# failing deep inside self-play. round2_seed_frac and value_ground_frac are
-# NOT incompatibilities: _biased_deal never calls rollout_value (only needed
-# engine-aware hand/up_card conversion, same as _cluster_key -- see
+# end-to-end and produces well-formed samples/training updates.
+# round2_seed_frac and value_ground_frac are NOT incompatibilities:
+# _biased_deal never calls rollout_value (only needed engine-aware
+# hand/up_card conversion, same as _cluster_key -- see
 # test_cpp_engine_biased_deal_works below), and value_ground_frac's cpp path
 # uses cpp_rollout_value (a Python-level mirror built on the already-bound
 # mceuchre_cpp.solve_value, see rebel/train_rebel.py) instead of
@@ -109,8 +107,6 @@ def test_net_agent_plays_legally():
 def test_cpp_engine_rejects_unsupported_options():
     with pytest.raises(ValueError):
         ReBeLTrainer(engine="nonsense")
-    with pytest.raises(ValueError):
-        ReBeLTrainer(engine="cpp", belief_model=object())
 
 
 def test_cpp_engine_biased_deal_works():
