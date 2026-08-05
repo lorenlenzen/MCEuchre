@@ -1,9 +1,12 @@
 #include "belief.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <stdexcept>
+
+#include "infoset.h"
 
 namespace mceuchre {
 
@@ -145,6 +148,89 @@ EuchreState sample_determinization(const EuchreState& state, int player,
         }
     }
     throw std::runtime_error("could not sample a consistent determinization");
+}
+
+std::pair<std::vector<EuchreState>, std::vector<double>>
+sample_weighted_worlds(const EuchreState& root, int actor, int num_worlds,
+                       PolicyValueNetImpl& net, std::mt19937_64& rng,
+                       double weight_floor) {
+    if (root.phase != Phase::BidRound1 && root.phase != Phase::BidRound2)
+        throw std::invalid_argument(
+            "sample_weighted_worlds: root must be BidRound1 or BidRound2");
+
+    std::vector<EuchreState> worlds;
+    worlds.reserve(num_worlds);
+    for (int i = 0; i < num_worlds; ++i)
+        worlds.push_back(sample_determinization(root, actor, rng));
+
+    // See belief.h's docstring: the prefix is fully determined by
+    // (root.phase, root.bids_seen), never by hands.
+    int n_round1_pass = (root.phase == Phase::BidRound2) ? 4 : root.bids_seen;
+    int n_round2_pass = (root.phase == Phase::BidRound2) ? root.bids_seen : 0;
+    int steps_per_world = n_round1_pass + n_round2_pass;
+
+    std::vector<double> uniform(num_worlds, 1.0 / num_worlds);
+    if (steps_per_world == 0) {
+        // Nothing observed yet (first to act in round 1) -- no bids to
+        // condition on.
+        return {std::move(worlds), std::move(uniform)};
+    }
+
+    // Collect every (obs, legal_mask) row across ALL worlds' prefix steps,
+    // then score them in ONE batched net.policy() call -- the whole point
+    // being this costs one extra forward pass per solve, not one per world
+    // or per step.
+    int total_steps = num_worlds * steps_per_world;
+    torch::NoGradGuard no_grad;
+    torch::Tensor obs = torch::empty({total_steps, OBS_SIZE}, torch::kFloat32);
+    torch::Tensor mask = torch::zeros({total_steps, NUM_ACTIONS}, torch::kBool);
+    float* obs_data = obs.data_ptr<float>();
+    bool* mask_data = mask.data_ptr<bool>();
+
+    int row = 0;
+    for (const auto& w : worlds) {
+        EuchreState replay = EuchreState::new_hand(root.dealer, root.stick_the_dealer,
+                                                    root.team0_score, root.team1_score)
+                                 .deal_from(w.hands, *w.up_card, w.kitty);
+        for (int i = 0; i < steps_per_world; ++i) {
+            observation_tensor(replay, replay.current_player, obs_data + row * OBS_SIZE);
+            legal_mask(replay, mask_data + row * NUM_ACTIONS);
+            replay = replay.apply(Action::pass_());
+            ++row;
+        }
+    }
+
+    torch::Tensor probs = net.policy(obs, mask);          // (total_steps, NUM_ACTIONS)
+    torch::Tensor pass_p = probs.select(1, ACT_PASS).contiguous();
+    const float* pp = pass_p.data_ptr<float>();
+
+    std::vector<double> log_w(num_worlds, 0.0);
+    row = 0;
+    for (int wi = 0; wi < num_worlds; ++wi) {
+        for (int i = 0; i < steps_per_world; ++i) {
+            float p = std::max(pp[row], 1e-6f);  // floor: avoid log(0)
+            log_w[wi] += std::log(static_cast<double>(p));
+            ++row;
+        }
+    }
+
+    double m = *std::max_element(log_w.begin(), log_w.end());
+    std::vector<double> weights(num_worlds);
+    double total = 0.0;
+    for (int wi = 0; wi < num_worlds; ++wi) {
+        weights[wi] = std::exp(log_w[wi] - m);
+        total += weights[wi];
+    }
+    // Floor relative to uniform, then renormalize -- bounds how hard an
+    // early (noisy) policy can starve a world of support entirely.
+    double total2 = 0.0;
+    for (int wi = 0; wi < num_worlds; ++wi) {
+        weights[wi] = std::max(weights[wi] / total, weight_floor * uniform[wi]);
+        total2 += weights[wi];
+    }
+    for (auto& w : weights) w /= total2;
+
+    return {std::move(worlds), std::move(weights)};
 }
 
 }  // namespace mceuchre

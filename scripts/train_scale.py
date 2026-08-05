@@ -19,6 +19,47 @@ from rebel.train_rebel import ReBeLTrainer, ReBeLNetAgent
 from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
 from rebel.match_equity import MatchEquityModel
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from train_pattern import (constrained_deal, parse_require,  # noqa: E402
+                           parse_score, parse_up_rank, parse_seat)
+
+
+def _pattern_deal_fn(trainer, patterns, void_up, score, up_ranks, seat, max_tries):
+    """--require's ReBeLTrainer.deal_fn: a fresh, engine-appropriate,
+    pattern-matching BID_ROUND_1 deal, drawn with `trainer.rng` -- the same
+    RNG self_play_hand's own randomness (world sampling, action sampling)
+    already uses, so the whole run stays under one seeded stream.
+
+    Always phase="bid1" and the returned `passes` are discarded (never
+    applied): unlike train_pattern.py's one-shot leaf generation, this deal
+    feeds an ordinary self_play_hand() call, which walks the WHOLE hand for
+    real starting from round-1's first decision -- every seat trains on it,
+    not just whichever seat holds the pattern.
+
+    constrained_deal PLACES the required cards rather than rejection-
+    sampling for them, so max_tries only needs to cover void/up-rank
+    exhaustion edge cases (see that function's docstring), not the
+    pattern's natural rarity -- a satisfiable pattern should succeed within
+    a handful of tries, not thousands.
+
+    `seat` (--seat) pins which bidding-order position gets the pattern-
+    holding hand (see parse_seat); it does NOT change where self_play_hand
+    starts playing the hand from -- that's still round-1's first decision
+    regardless, same as any other deal. It only constrains who ends up
+    holding the pattern by the time their own turn comes around."""
+    def deal_fn():
+        for _ in range(max_tries):
+            drawn = constrained_deal(trainer, patterns, "bid1", trainer.rng,
+                                     void_up=void_up, score=score,
+                                     up_ranks=up_ranks, seat=seat)
+            if drawn is not None:
+                return drawn[0]
+        raise RuntimeError(
+            f"--require couldn't be satisfied in {max_tries} tries -- try "
+            f"raising --require-max-tries, or check --void-up/--up-rank "
+            f"aren't contradictory with the pattern")
+    return deal_fn
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -84,6 +125,58 @@ def main() -> None:
                          "to --num-worlds) -- kept separate from "
                          "--bid-exact-worlds; see train_parallel.py's flag "
                          "for the bug that shared knob caused.")
+    ap.add_argument("--belief-weight-frac", type=float, default=0.0,
+                    help="fraction of bidding-phase net-leaf solves that "
+                         "importance-weight sampled worlds by the net's own "
+                         "pass-sequence probability instead of sampling them "
+                         "uniformly; see train_parallel.py's flag for the "
+                         "full rationale. cpp engine only. Off by default.")
+    ap.add_argument("--require", type=str, default=None,
+                    help="run ordinary self-play (every seat's real decision "
+                         "gets a genuine solve, unchanged, from round-1 "
+                         "bidding onward) but ONLY from deals where the "
+                         "acting-to-be seat's hand matches this structural "
+                         "pattern -- same <rank><relsuit> syntax as "
+                         "scripts/train_pattern.py's --require (e.g. "
+                         "'JU,JN,JG,Jg' for all four jacks). Unlike "
+                         "train_pattern.py this doesn't fast-forward to one "
+                         "decision or freeze the trunk -- it's the same "
+                         "training loop as an unconstrained run, just with "
+                         "every deal drawn from the pattern instead of "
+                         "uniformly at random, so every seat trains on it, "
+                         "not just the pattern-holder. --round2-seed-frac "
+                         "and --value-ground-frac both still apply on top "
+                         "(they call the same overridden dealer). Off "
+                         "(uniform dealing) by default.")
+    ap.add_argument("--void-up", action="store_true",
+                    help="(--require only) the pattern-holding hand must "
+                         "also be void in the up-card's (effective) suit.")
+    ap.add_argument("--score", type=str, default=None,
+                    help="(--require only) pin the match score as "
+                         "MINE,THEIRS for every pattern-matching deal (e.g. "
+                         "'8,9'), from the pattern-holder's side. Without "
+                         "this the score is sampled from the equity model "
+                         "as usual (or stays 0-0 with --no-match-equity).")
+    ap.add_argument("--up-rank", type=str, default=None,
+                    help="(--require only) pin the up card's rank, e.g. "
+                         "'J' or 'T,J,Q'; see scripts/train_pattern.py's "
+                         "flag of the same name.")
+    ap.add_argument("--seat", type=str, default=None,
+                    choices=["first", "second", "third", "dealer"],
+                    help="(--require only) pin which bidding-order position "
+                         "(first/second/third/dealer, bidding opens left of "
+                         "the dealer who acts last -- scripts/quiz_eval.py's "
+                         "seat convention) gets the pattern-holding hand. "
+                         "Does NOT change where self-play starts playing "
+                         "the hand from -- still round-1's first decision "
+                         "regardless, same as any deal. Without it the "
+                         "position is uniformly random.")
+    ap.add_argument("--require-max-tries", type=int, default=100,
+                    help="(--require only) retries per hand before giving "
+                         "up and raising -- constrained_deal PLACES the "
+                         "pattern rather than rejection-sampling for it, so "
+                         "this only needs to cover void/up-rank exhaustion "
+                         "edge cases, not the pattern's natural rarity.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero. Worth it after a change to "
@@ -115,6 +208,31 @@ def main() -> None:
                          "not a new C++ port.")
     args = ap.parse_args()
 
+    # --void-up/--score/--up-rank/--seat place cards / fix state at deal
+    # time, which only --require's constructor does -- without it there's
+    # no pattern-matching deal for them to constrain.
+    for flag, val in (("--void-up", args.void_up), ("--score", args.score),
+                      ("--up-rank", args.up_rank), ("--seat", args.seat)):
+        if val and args.require is None:
+            print(f"error: {flag} needs --require")
+            sys.exit(1)
+    require_patterns = require_score = require_up_ranks = require_seat = None
+    if args.require is not None:
+        require_patterns = parse_require(args.require)
+        require_score = parse_score(args.score) if args.score else None
+        require_up_ranks = parse_up_rank(args.up_rank) if args.up_rank else None
+        require_seat = parse_seat(args.seat) if args.seat else None
+        desc = f"--require {args.require}"
+        if args.void_up:
+            desc += ", void in up"
+        if args.score:
+            desc += f", at {args.score}"
+        if args.up_rank:
+            desc += f", up-card rank in {{{args.up_rank}}}"
+        if args.seat:
+            desc += f", seat={args.seat}"
+        print(f"pattern-constrained dealing: {desc}")
+
     print(f"self-play engine: {args.engine}")
 
     equity_model = None
@@ -145,7 +263,12 @@ def main() -> None:
         play_exact_frac=args.play_exact_frac,
         play_exact_lead_only=args.play_exact_lead_only,
         play_exact_worlds=args.play_exact_worlds,
+        belief_weight_frac=args.belief_weight_frac,
         engine=args.engine, lr=1e-3, seed=0)
+    if require_patterns is not None:
+        trainer.deal_fn = _pattern_deal_fn(
+            trainer, require_patterns, args.void_up, require_score,
+            require_up_ranks, require_seat, args.require_max_tries)
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")

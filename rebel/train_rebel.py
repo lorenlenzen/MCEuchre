@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -251,6 +251,8 @@ class ReBeLTrainer:
                  play_exact_frac: float = 0.0,
                  play_exact_lead_only: bool = True,
                  play_exact_worlds: Optional[int] = None,
+                 belief_weight_frac: float = 0.0,
+                 deal_fn: Optional[Callable[[], Any]] = None,
                  equity_model: Optional["MatchEquityModel"] = None,
                  engine: str = "python") -> None:
         if engine not in ("python", "cpp"):
@@ -266,6 +268,36 @@ class ReBeLTrainer:
             self._cpp.MatchEquityModel(equity_model.target, equity_model.table.flatten().tolist())
             if engine == "cpp" and equity_model is not None else None)
         self.net = net or PolicyValueNet()
+        # A cpp.PolicyValueNet mirror of self.net, used only for the
+        # net-native SubgameSolver leaf-eval path (see cpp/subgame.h's
+        # PolicyValueNetImpl constructor and _sync_cpp_net) -- self-play's
+        # hot path, since it avoids a Python callback per solve. Kept in
+        # sync with self.net's weights once per self_play_hand() call (see
+        # _sync_cpp_net's docstring for why that's exactly as fresh as the
+        # old per-call cpp_batch_value_fn_from_net(self.net) closure was).
+        # Built with cpp.PolicyValueNet's own defaults, which is only valid
+        # because every caller in this codebase constructs `net` the same
+        # way (see rebel/networks.py's PolicyValueNet defaults) -- a custom
+        # architecture would fail loudly in _sync_cpp_net's load_state_dict_
+        # (shape/key mismatch), not silently.
+        #
+        # None (no mirror) when self.net is ITSELF a cpp-native module --
+        # e.g. ReBeLTrainer(net=cpp.PolicyValueNet(), engine="cpp") for
+        # real LibTorch-driven training (see
+        # test_cpp_net_trains_via_rebel_trainer_and_checkpoint_interops).
+        # self.net.state_dict() (the generic, recursive, Python-side
+        # version) can't be called on a cpp-native module -- its own
+        # children are raw C++ nn.Module objects lacking the Python glue
+        # bind_module only gives the top-level wrapper (see cpp/README.md)
+        # -- but there's also no need for it: self.net.cpp_module already
+        # IS the live PolicyValueNetImpl being trained, so leaf eval reads
+        # from it directly instead of copying into a redundant mirror.
+        self._cpp_net = (self._cpp.PolicyValueNet()
+                         if engine == "cpp" and not hasattr(self.net, "cpp_module")
+                         else None)
+        if self._cpp_net is not None:
+            self._cpp_net.eval()
+            self._sync_cpp_net()
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         # Safety net, not a tuning knob: caps the gradient norm of any single
         # train_step so one high-loss batch can't produce an outsized update.
@@ -363,6 +395,32 @@ class ReBeLTrainer:
         # (this session's --bid-exact-worlds setting) they were likely much
         # closer to noise than ground truth, for the entire run.
         self.play_exact_worlds = play_exact_worlds
+        # Fraction of BIDDING-phase net-leaf solves (BidRound1/BidRound2
+        # only, never Play/DealerDiscard -- see self_play_hand) that sample
+        # worlds via belief-weighted importance sampling (cpp.
+        # sample_weighted_worlds, cpp/belief.cpp) instead of uniformly:
+        # weight each determinization by the net's OWN probability for the
+        # pass sequence actually observed getting there, replacing the
+        # deleted rebel/belief_model.py heuristic with the net's own belief
+        # rather than a hand-tuned formula. Cpp engine only -- the python
+        # SubgameSolver path has no equivalent yet. Fractional (like
+        # bid_exact_frac) rather than a flat on/off, deliberately: unlike
+        # exact-leaf solving this is always cheap (one extra batched
+        # net.policy() call per solve, not a double-dummy search), so the
+        # fraction isn't a cost knob here -- it's a rollout-risk one, since
+        # an early, barely-trained bidding policy makes for a noisy belief
+        # signal (the same self-referential-drift concern value_ground_frac
+        # exists to counter for the value head). Defaults to 0 (off).
+        self.belief_weight_frac = belief_weight_frac
+        # Overrides _fresh_deal entirely when set (a zero-arg callable
+        # returning a fresh, engine-appropriate EuchreState) -- the hook
+        # scripts/train_scale.py's --require uses to run ordinary self-play
+        # (real per-decision solves for every seat, unchanged) from
+        # pattern-constrained deals instead of uniformly random ones.
+        # _biased_deal and _grounded_value_sample both call _fresh_deal
+        # internally, so they inherit this too, same as any other override.
+        # None (default) preserves exact prior (uniform dealing) behavior.
+        self.deal_fn = deal_fn
         # None (default) preserves exact prior behavior throughout this
         # class: every deal starts 0-0, SubgameSolver gets no equity_model
         # (raw point-differential CFR targets, unchanged), and
@@ -547,6 +605,33 @@ class ReBeLTrainer:
             return cpp_batch_value_fn_from_net(self.net)(states)
         return batch_value_fn_from_net(self.net)(states)
 
+    def _sync_cpp_net(self) -> None:
+        """Copy self.net's current weights into self._cpp_net (cpp engine
+        only), so the net-native SubgameSolver leaf-eval path -- which reads
+        directly from the C++ module, not this Python one -- sees the same
+        weights self.net has right now. No-op when self._cpp_net is None:
+        that means self.net is itself cpp-native (see __init__), in which
+        case there's no mirror to sync -- self.net.cpp_module already IS
+        the live net.
+
+        Called once per self_play_hand() call, not once per solve within a
+        hand: train_step() only ever runs between self_play_hand() calls,
+        never during one (self_play_hand itself never updates self.net), so
+        self.net's weights are constant for a whole hand and one sync at the
+        top of the method is exactly as fresh as the old per-solve
+        cpp_batch_value_fn_from_net(self.net) closure was -- no new
+        staleness introduced by this change."""
+        if self._cpp_net is not None:
+            self._cpp_net.load_state_dict_(self.net.state_dict())
+
+    def _leaf_eval_net(self):
+        """The raw PolicyValueNetImpl the net-native SubgameSolver ctor
+        should read from: self._cpp_net's mirror, or self.net's own
+        cpp_module directly when self.net is itself cpp-native (no mirror
+        exists then -- see __init__ and _sync_cpp_net)."""
+        return (self._cpp_net.cpp_module if self._cpp_net is not None
+               else self.net.cpp_module)
+
     def _value_fn_for(self, actor: int):
         """Leaf-value function bound to one solve's own actor.
 
@@ -666,6 +751,8 @@ class ReBeLTrainer:
     # -- self-play -----------------------------------------------------------
 
     def _fresh_deal(self):
+        if self.deal_fn is not None:
+            return self.deal_fn()
         dealer = self.rng.randint(0, 3)
         team0_score = team1_score = 0
         if self.equity_model is not None:
@@ -1009,6 +1096,12 @@ class ReBeLTrainer:
             supervise_policy=False)
 
     def self_play_hand(self) -> Tuple[int, int]:
+        if self.engine == "cpp":
+            # self.net's weights are constant for the rest of this call (no
+            # train_step happens mid-hand), so one sync up front is exactly
+            # as fresh as the old per-solve callback was -- see
+            # _sync_cpp_net's docstring.
+            self._sync_cpp_net()
         if self.value_ground_frac > 0 and self.rng.random() < self.value_ground_frac:
             gs = self._grounded_value_sample()
             if gs is not None:
@@ -1027,8 +1120,6 @@ class ReBeLTrainer:
             # ONCE per solve and applied to every leaf in it -- see
             # _exact_leaf_fn for why this must never be mixed within a tree.
             exact = self._use_exact_leaves(state)
-            leaf_fn = (self._exact_leaf_fn() if exact
-                       else self._value_fn_for(actor))
             # Bid-exact and play-exact each get their OWN worlds override --
             # see play_exact_worlds's docstring for the bug this fixes
             # (bid_exact_worlds used to apply to both, regardless of phase).
@@ -1041,11 +1132,30 @@ class ReBeLTrainer:
                 worlds = self.num_worlds
             if self.engine == "cpp":
                 depth = self._depth_for(state)
-                solver = self._cpp.SubgameSolver(
-                    state, actor, worlds, self.cfr_iterations,
-                    -1 if depth is None else depth, leaf_fn,
-                    self._cpp_equity_model, self.rng.getrandbits(63))
+                depth_limit = -1 if depth is None else depth
+                if exact:
+                    solver = self._cpp.SubgameSolver(
+                        state, actor, worlds, self.cfr_iterations, depth_limit,
+                        self._exact_leaf_fn(), self._cpp_equity_model,
+                        self.rng.getrandbits(63))
+                else:
+                    # Net-native leaf eval: no Python callback for the
+                    # common (net-leaf) self-play case -- see
+                    # cpp/subgame.h's PolicyValueNetImpl constructor.
+                    # _leaf_eval_net() was just synced to self.net's
+                    # current weights above (or, if self.net is itself
+                    # cpp-native, is already live -- see _sync_cpp_net).
+                    is_bidding = state.phase in (self._cpp.Phase.BidRound1,
+                                                 self._cpp.Phase.BidRound2)
+                    belief_weighted = (is_bidding and self.belief_weight_frac > 0
+                                      and self.rng.random() < self.belief_weight_frac)
+                    solver = self._cpp.SubgameSolver(
+                        state, actor, worlds, self.cfr_iterations, depth_limit,
+                        self._leaf_eval_net(), actor, belief_weighted,
+                        self._cpp_equity_model, self.rng.getrandbits(63))
             else:
+                leaf_fn = (self._exact_leaf_fn() if exact
+                          else self._value_fn_for(actor))
                 solver = SubgameSolver(
                     state, actor, num_worlds=worlds,
                     iterations=self.cfr_iterations, depth_limit=self._depth_for(state),

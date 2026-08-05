@@ -1,5 +1,6 @@
 #include "infoset.h"
 
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 
@@ -222,6 +223,13 @@ std::string infoset_key(const EuchreState& state, int player) {
     }
     os << "/w" << state.tricks_won[0] << "," << state.tricks_won[1];
     return os.str();
+}
+
+void legal_mask(const EuchreState& state, bool* out) {
+    std::fill(out, out + NUM_ACTIONS, false);
+    for (const auto& a : state.legal_actions()) {
+        out[a.index()] = true;
+    }
 }
 
 }  // namespace mceuchre

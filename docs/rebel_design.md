@@ -381,6 +381,42 @@ regenerating/retraining under this milestone.
 * Ablations to run on the ladder: depth limit, CFR iterations, self-play
   population.
 
+### Planned: net-native C++ self-play + belief-weighted determinization
+
+Replaces the deleted heuristic `rebel/belief_model.py` (session decision: move
+away from a hand-tuned calling-behaviour formula) with importance-weighting
+determinizations by the trained policy net's own probability for the pass
+sequence actually observed getting to a bidding-phase decision — no rejection
+sampling, so no risk of the "deal until N passes line up" slowdown that
+approach would have. Ported into C++ (`cpp/belief.cpp`, using the
+already-libtorch-ported `PolicyValueNetImpl`), alongside removing the last
+Python callback in the cpp hot path (`SubgameSolver`'s net-leaf evaluation,
+currently a per-solve callback into a Python closure). Design constraints
+fixed before implementation starts:
+
+* **Every net reference is passed explicitly as a parameter** (to
+  `sample_weighted_worlds`, to `SubgameSolver`'s constructor, to the actor
+  loop) — never a hardcoded singleton like `self.net`. This is the one
+  property that keeps the work compatible with planned future **league
+  play** (multiple distinct agents, evolutionary retraining, heterogeneous
+  per-seat nets) without needing to be redesigned when that lands: a league
+  scheduler can hand different solves a different net purely by changing
+  what gets passed in.
+* **Belief is always self-referential, deliberately.** The net used to judge
+  "how plausible is this hand given the bids seen" is always the same net
+  occupying the acting seat right now — never a model of a specific
+  opponent's distinct policy. This isn't a limitation to fix later: the goal
+  here is equilibrium play (CFR's natural target), not exploiting a
+  particular opponent, and self-referential belief is what self-play CFR
+  already assumes structurally. League play will vary *which* net is "self"
+  per seat, but each seat's belief stays about its own net, not a guess at
+  someone else's.
+* Frozen-snapshot cadence for the belief net piggybacks on
+  `scripts/train_parallel.py`'s existing actor `version`/`--publish-secs`
+  reload mechanism rather than inventing a new one — actors already run
+  self-play against periodically-stale weights by design; the belief net
+  snapshot refreshes at the same point the leaf-eval net does.
+
 ### Known gaps (not yet scheduled)
 
 * ~~**No score/match-equity awareness.**~~ **Resolved — Milestone 3.6.**

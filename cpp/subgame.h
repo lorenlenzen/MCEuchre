@@ -11,6 +11,7 @@
 
 #include "engine.h"
 #include "match_equity.h"
+#include "network.h"
 
 namespace mceuchre {
 
@@ -59,6 +60,35 @@ public:
                   int iterations, int depth_limit, BatchValueFn batch_value_fn,
                   const MatchEquityModel* equity_model);
 
+    // Net-native constructor: leaves are valued by a direct in-process call
+    // to `net` (ported PolicyValueNetImpl) instead of a BatchValueFn -- no
+    // Python callback for the common self-play case (net-leaf, not
+    // exact-leaf), matching cpp_batch_value_fn_from_net's math exactly (see
+    // rebel/train_rebel.py) but without crossing back into Python at all.
+    // `perspective` mirrors that function's `perspective` param: unset means
+    // "each leaf's own current_player" (Python's None), set means a fixed
+    // player index for every leaf in this solve.
+    //
+    // `belief_weighted`: when true AND root is a BidRound1/BidRound2
+    // decision, worlds are sampled via sample_weighted_worlds (belief.h) --
+    // importance-weighted by `net`'s own probability for the pass sequence
+    // observed getting to root -- instead of sample_weighted_worlds's
+    // uniform sibling. Ignored (falls back to uniform) for any other root
+    // phase, since belief.h's prefix-replay only applies to bidding.
+    SubgameSolver(const EuchreState& root, int actor, int num_worlds, int iterations,
+                  int depth_limit, PolicyValueNetImpl& net, c10::optional<int> perspective,
+                  bool belief_weighted, const MatchEquityModel* equity_model, uint64_t seed);
+
+    // Testing constructor: explicit pre-built worlds (as above) + net-native
+    // leaf eval, so build_trees_net_native() can be differential-tested
+    // against the BatchValueFn callback path on IDENTICAL worlds/weights,
+    // isolating "did porting leaf eval into C++ change the math" from World
+    // sampling, which is unrelated to this change.
+    SubgameSolver(const EuchreState& root, int actor,
+                  std::vector<EuchreState> worlds, std::vector<double> weights,
+                  int iterations, int depth_limit, PolicyValueNetImpl& net,
+                  c10::optional<int> perspective, const MatchEquityModel* equity_model);
+
     void run();
     // action_index -> probability, average strategy at the actor's root infoset.
     std::unordered_map<int, double> root_policy();
@@ -66,16 +96,20 @@ public:
 
 private:
     void init_common(const EuchreState& root, int actor, int iterations, int depth_limit,
-                     BatchValueFn batch_value_fn, const MatchEquityModel* equity_model);
+                     bool has_leaf_eval, const MatchEquityModel* equity_model);
     TNode* build(const EuchreState& state, int depth);
     std::array<double, 4> cfr(TNode* node, std::array<double, 4> reach, double chance_reach);
     void build_trees();
+    void build_trees_net_native();  // leaf eval for the PolicyValueNetImpl constructor
     std::array<double, 4> expected_value(TNode* node);
 
     int actor_ = 0;
     int iterations_ = 0;
     int depth_limit_ = -1;
+    bool has_leaf_eval_ = false;
     BatchValueFn batch_value_fn_;
+    PolicyValueNetImpl* net_ = nullptr;   // non-null iff constructed with the net-native ctor
+    c10::optional<int> perspective_;      // net-native ctor only; see that ctor's docstring
     const MatchEquityModel* equity_model_ = nullptr;
     int team0_score_ = 0, team1_score_ = 0;
     bool dealer_is_team0_ = true;  // fixed for the whole subgame -- the deal doesn't change mid-hand

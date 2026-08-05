@@ -57,8 +57,10 @@ def card_str(c):
     Card.__str__ uses unicode suit symbols, which fail to encode on the
     default Windows console codepage."""
     return f"{_RANK_STR[c.rank]}{_SUIT_STR[c.suit]}"
-# acting order at the table: first acts 1st, dealer acts 4th
-_SEAT_ORDER = {"first": 1, "second": 2, "third": 3, "dealer": 4}
+# Acting order at the table: first acts 1st, dealer acts 4th (bidding opens
+# left of the dealer). Public -- scripts/train_pattern.py's --seat reuses
+# this exact convention rather than inventing a competing seat numbering.
+SEAT_ORDER = {"first": 1, "second": 2, "third": 3, "dealer": 4}
 
 
 def card(s):
@@ -69,7 +71,7 @@ def build_state(q):
     """Construct the EuchreState at q's bidding decision, with the answerer
     seated at absolute seat 0."""
     P = 0
-    a = _SEAT_ORDER[q["seat"]]          # 1..4 acting order of the answerer
+    a = SEAT_ORDER[q["seat"]]          # 1..4 acting order of the answerer
     dealer = (P - a) % 4                # so the answerer sits `a`-th after dealer
     my_hand = [card(c) for c in q["hand"]]
 
@@ -206,7 +208,7 @@ def build_play_state(q):
     mistake in the manual seat-position reasoning above raises immediately
     rather than silently building a wrong-but-legal state."""
     P = 0
-    a = _SEAT_ORDER[q["seat"]]
+    a = SEAT_ORDER[q["seat"]]
     dealer = (P - a) % 4
 
     full_hand = [card(c) for c in q["full_hand"]]

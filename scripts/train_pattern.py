@@ -48,7 +48,7 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from quiz_eval import build_state_any, score_net  # noqa: E402
+from quiz_eval import build_state_any, score_net, SEAT_ORDER  # noqa: E402
 
 from euchre.actions import NUM_ACTIONS, Pass, action_to_index  # noqa: E402
 from euchre.cards import (Card, Rank, Suit, SUITS, effective_suit,  # noqa: E402
@@ -208,6 +208,20 @@ def parse_up_rank(text):
     return out
 
 
+def parse_seat(text):
+    """"first"/"second"/"third"/"dealer" -> that seat's bidding-order
+    position (1-4, dealer=4) -- the same convention scripts/quiz_eval.py's
+    SEAT_ORDER already uses (bidding opens left of the dealer, who acts
+    last), reused here rather than inventing a second seat numbering.
+    Case-insensitive.
+    """
+    key = text.strip().lower()
+    if key not in SEAT_ORDER:
+        raise ValueError(f"--seat must be one of {', '.join(SEAT_ORDER)}, "
+                         f"got {text!r}")
+    return SEAT_ORDER[key]
+
+
 def _forbidden_for_void_up(up):
     """Cards the acting hand may not hold, to be void in the up-card's suit.
 
@@ -220,7 +234,7 @@ def _forbidden_for_void_up(up):
 
 
 def constrained_deal(trainer, patterns, phase, rng, void_up=False, score=None,
-                     up_ranks=None):
+                     up_ranks=None, seat=None):
     """A deal in which the seat about to act holds a card for every pattern,
     is void in the up-card's suit if asked, and (optionally) faces a pinned
     match score.
@@ -230,9 +244,10 @@ def constrained_deal(trainer, patterns, phase, rng, void_up=False, score=None,
     seat, ~640,000 draws for 300 samples -- and it also isn't what you want,
     since every accepted deal would still be one arbitrary deal. Here the
     constrained parts are fixed and *everything else* varies: the rest of the
-    hand, the up-card's rank (unless --up-rank pins it), the dealer, all
-    three opponents' hands, and the score unless pinned. Returns
-    (state, passes_to_apply), or None if the draw failed.
+    hand, the up-card's rank (unless --up-rank pins it), the dealer (unless
+    --seat pins the actor's bidding-order position), all three opponents'
+    hands, and the score unless pinned. Returns (state, passes_to_apply), or
+    None if the draw failed.
 
     `patterns` uses --require's U/N/G/g relative suits, which name a role
     relative to the up-card rather than a fixed suit -- so, unlike the old
@@ -244,8 +259,19 @@ def constrained_deal(trainer, patterns, phase, rng, void_up=False, score=None,
     of the whole draw, not something fixable in place. Retries a bounded
     number of times rather than looping forever; the caller counts failures
     against --max-tries.
+
+    `seat` (--seat, via parse_seat) pins the acting player's bidding-order
+    position -- 1..4 with dealer=4, quiz_eval.py's SEAT_ORDER convention --
+    rather than leaving it uniformly random. It constrains only WHICH
+    position (first/second/third/dealer) gets the pattern-holding hand, not
+    the absolute table seat: `actor` (which physical seat that position maps
+    to) still varies freely, same as always.
     """
-    passes = rng.randint(0, 3) if phase == "bid1" else 4 + rng.randint(0, 3)
+    if seat is not None:
+        within_round = seat - 1  # 0..3 passes preceding the actor this round
+    else:
+        within_round = rng.randint(0, 3)
+    passes = within_round if phase == "bid1" else 4 + within_round
     actor = rng.randint(0, 3)
     # Seat the dealer so `actor` is the one to act after exactly `passes`
     # passes: bidding opens at dealer+1 and round 2 reopens there too.
@@ -360,7 +386,7 @@ def walk_to_phase(trainer, state, phase, rng):
 
 def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
              patterns=None, phase="bid1", void_up=False, score=None,
-             up_ranks=None):
+             up_ranks=None, seat=None):
     """n exact-leaf-solved Samples matching the requested pattern.
 
     Two selection modes. `cluster` rejection-samples until the deal lands in a
@@ -376,7 +402,7 @@ def generate(trainer, cluster, n, worlds, iters, max_tries, rng,
         if patterns is not None:
             drawn = constrained_deal(trainer, patterns, phase, rng,
                                      void_up=void_up, score=score,
-                                     up_ranks=up_ranks)
+                                     up_ranks=up_ranks, seat=seat)
             if drawn is None:
                 continue
             state = apply_passes(trainer, *drawn)
@@ -490,6 +516,17 @@ def main():
                          "suit; this fixes its rank the same way --require "
                          "fixes hand cards). Without it the rank is any "
                          "rank not already placed by --require.")
+    ap.add_argument("--seat", type=str, default=None,
+                    choices=["first", "second", "third", "dealer"],
+                    help="pin the acting player's bidding-order position "
+                         "(bidding opens left of the dealer, who acts "
+                         "last -- same first/second/third/dealer convention "
+                         "scripts/quiz_eval.py's quiz questions use). Needs "
+                         "--require. Constrains only WHICH position gets "
+                         "the pattern-holding hand; the absolute table seat "
+                         "and dealer still vary freely. Without it the "
+                         "position is uniformly random, same as before this "
+                         "flag existed.")
     ap.add_argument("--phase", choices=["bid1", "bid2"], default="bid1",
                     help="which decision to solve, for --require (with "
                          "--quiz-id/--cluster the phase comes from those).")
@@ -540,12 +577,12 @@ def main():
     if len(given) != 1:
         raise SystemExit("give exactly one of --quiz-id, --cluster or "
                          f"--require (got {given or 'none'})")
-    # --void-up, --score and --up-rank place cards / fix state at deal time,
-    # which only the --require constructor does; cluster selection reaches
-    # its positions by rejection sampling and has no way to impose any of
-    # them.
+    # --void-up, --score, --up-rank and --seat place cards / fix state at
+    # deal time, which only the --require constructor does; cluster
+    # selection reaches its positions by rejection sampling and has no way
+    # to impose any of them.
     for flag, val in (("--void-up", args.void_up), ("--score", args.score),
-                      ("--up-rank", args.up_rank)):
+                      ("--up-rank", args.up_rank), ("--seat", args.seat)):
         if val and args.require is None:
             raise SystemExit(f"{flag} needs --require (it constrains how the "
                              f"deal is BUILT; --quiz-id/--cluster sample "
@@ -569,6 +606,7 @@ def main():
     patterns, cluster = None, None
     score = parse_score(args.score) if args.score else None
     up_ranks = parse_up_rank(args.up_rank) if args.up_rank else None
+    seat = parse_seat(args.seat) if args.seat else None
     if score is not None:
         target = getattr(equity_model, "target", 10) or 10
         if max(score) >= target:
@@ -594,6 +632,8 @@ def main():
             desc += f", at {score[0]}-{score[1]}"
         if up_ranks:
             desc += f", up-card rank in {{{','.join(r.symbol for r in up_ranks)}}}"
+        if args.seat:
+            desc += f", seat={args.seat}"
         print(f"pattern: {desc}", flush=True)
     elif args.quiz_id is not None:
         cluster, q = cluster_of_quiz_question(trainer, args.quiz, args.quiz_id)
@@ -609,7 +649,7 @@ def main():
     samples, tries = generate(trainer, cluster, args.samples, args.exact_worlds,
                               args.cfr_iters, args.max_tries, rng,
                               patterns=patterns, phase=phase, void_up=args.void_up,
-                              score=score, up_ranks=up_ranks)
+                              score=score, up_ranks=up_ranks, seat=seat)
     if not samples:
         raise SystemExit(f"no usable deals in {tries} tries -- "
                          + ("stick-the-dealer may be blocking the passes "

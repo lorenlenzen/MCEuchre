@@ -2,6 +2,7 @@
 
 #include <numeric>
 #include <stdexcept>
+#include <tuple>
 
 #include "belief.h"
 #include "infoset.h"
@@ -37,14 +38,14 @@ std::vector<double> Info::average() const {
 }
 
 void SubgameSolver::init_common(const EuchreState& root, int actor, int iterations,
-                                int depth_limit, BatchValueFn batch_value_fn,
+                                int depth_limit, bool has_leaf_eval,
                                 const MatchEquityModel* equity_model) {
     if (root.is_terminal() || root.current_player != actor)
         throw std::invalid_argument("subgame root must be a decision node for actor");
     actor_ = actor;
     iterations_ = iterations;
     depth_limit_ = depth_limit;
-    batch_value_fn_ = std::move(batch_value_fn);
+    has_leaf_eval_ = has_leaf_eval;
     equity_model_ = equity_model;
     team0_score_ = root.team0_score;
     team1_score_ = root.team1_score;
@@ -56,7 +57,9 @@ void SubgameSolver::init_common(const EuchreState& root, int actor, int iteratio
 SubgameSolver::SubgameSolver(const EuchreState& root, int actor, int num_worlds, int iterations,
                              int depth_limit, BatchValueFn batch_value_fn,
                              const MatchEquityModel* equity_model, uint64_t seed) {
-    init_common(root, actor, iterations, depth_limit, std::move(batch_value_fn), equity_model);
+    bool has_leaf_eval = static_cast<bool>(batch_value_fn);
+    batch_value_fn_ = std::move(batch_value_fn);
+    init_common(root, actor, iterations, depth_limit, has_leaf_eval, equity_model);
     std::mt19937_64 rng(seed);
     worlds_.reserve(num_worlds);
     for (int i = 0; i < num_worlds; ++i)
@@ -68,7 +71,40 @@ SubgameSolver::SubgameSolver(const EuchreState& root, int actor,
                              std::vector<EuchreState> worlds, std::vector<double> weights,
                              int iterations, int depth_limit, BatchValueFn batch_value_fn,
                              const MatchEquityModel* equity_model) {
-    init_common(root, actor, iterations, depth_limit, std::move(batch_value_fn), equity_model);
+    bool has_leaf_eval = static_cast<bool>(batch_value_fn);
+    batch_value_fn_ = std::move(batch_value_fn);
+    init_common(root, actor, iterations, depth_limit, has_leaf_eval, equity_model);
+    worlds_ = std::move(worlds);
+    weights_ = std::move(weights);
+}
+
+SubgameSolver::SubgameSolver(const EuchreState& root, int actor, int num_worlds, int iterations,
+                             int depth_limit, PolicyValueNetImpl& net,
+                             c10::optional<int> perspective, bool belief_weighted,
+                             const MatchEquityModel* equity_model, uint64_t seed) {
+    net_ = &net;
+    perspective_ = perspective;
+    init_common(root, actor, iterations, depth_limit, /*has_leaf_eval=*/true, equity_model);
+    std::mt19937_64 rng(seed);
+    if (belief_weighted
+        && (root.phase == Phase::BidRound1 || root.phase == Phase::BidRound2)) {
+        std::tie(worlds_, weights_) = sample_weighted_worlds(root, actor, num_worlds, net, rng);
+    } else {
+        worlds_.reserve(num_worlds);
+        for (int i = 0; i < num_worlds; ++i)
+            worlds_.push_back(sample_determinization(root, actor, rng));
+        weights_.assign(num_worlds, 1.0 / num_worlds);
+    }
+}
+
+SubgameSolver::SubgameSolver(const EuchreState& root, int actor,
+                             std::vector<EuchreState> worlds, std::vector<double> weights,
+                             int iterations, int depth_limit, PolicyValueNetImpl& net,
+                             c10::optional<int> perspective,
+                             const MatchEquityModel* equity_model) {
+    net_ = &net;
+    perspective_ = perspective;
+    init_common(root, actor, iterations, depth_limit, /*has_leaf_eval=*/true, equity_model);
     worlds_ = std::move(worlds);
     weights_ = std::move(weights);
 }
@@ -87,7 +123,7 @@ TNode* SubgameSolver::build(const EuchreState& state, int depth) {
         return node;
     }
     if (depth_limit_ >= 0 && depth >= depth_limit_) {
-        if (batch_value_fn_) {
+        if (has_leaf_eval_) {
             pending_leaves_.emplace_back(node, state);  // resolved later, batched
             return node;
         }
@@ -150,7 +186,7 @@ TNode* SubgameSolver::build(const EuchreState& state, int depth) {
             if (child.phase == Phase::Play && !child.is_terminal()) {
                 node_storage_.emplace_back();
                 TNode* leaf = &node_storage_.back();
-                if (batch_value_fn_) {
+                if (has_leaf_eval_) {
                     pending_leaves_.emplace_back(leaf, child);
                 } else {
                     leaf->util = {0.0, 0.0, 0.0, 0.0};
@@ -200,21 +236,54 @@ std::array<double, 4> SubgameSolver::cfr(TNode* node, std::array<double, 4> reac
     return node_util;
 }
 
+void SubgameSolver::build_trees_net_native() {
+    // Mirrors rebel/train_rebel.py's cpp_batch_value_fn_from_net exactly
+    // (see that function's docstring for why `perspective` matters), but as
+    // one in-process forward pass instead of a Python callback -- no numpy/
+    // torch round-trip across the pybind boundary.
+    size_t n = pending_leaves_.size();
+    torch::NoGradGuard no_grad;
+    torch::Tensor obs = torch::empty({static_cast<int64_t>(n), OBS_SIZE}, torch::kFloat32);
+    float* obs_data = obs.data_ptr<float>();
+    std::vector<int> players(n);
+    for (size_t i = 0; i < n; ++i) {
+        const EuchreState& st = pending_leaves_[i].second;
+        int player = st.is_terminal() ? 0
+                   : (perspective_.has_value() ? *perspective_ : st.current_player);
+        players[i] = player;
+        observation_tensor(st, player, obs_data + i * OBS_SIZE);
+    }
+    auto [logits, value] = net_->forward(obs);
+    (void)logits;
+    torch::Tensor value_c = value.contiguous();
+    const float* v = value_c.data_ptr<float>();
+    for (size_t i = 0; i < n; ++i) {
+        TNode* node = pending_leaves_[i].first;
+        double v0 = (team_of(players[i]) == 0) ? v[i] : -v[i];
+        for (int p = 0; p < 4; ++p) node->util[p] = (team_of(p) == 0) ? v0 : -v0;
+        node->has_util = true;
+    }
+}
+
 void SubgameSolver::build_trees() {
     if (built_) return;
     roots_.clear();
     roots_.reserve(worlds_.size());
     for (const auto& w : worlds_) roots_.push_back(build(w, 0));
     if (!pending_leaves_.empty()) {
-        std::vector<EuchreState> states;
-        states.reserve(pending_leaves_.size());
-        for (auto& [node, st] : pending_leaves_) states.push_back(st);
-        std::vector<float> values = batch_value_fn_(states);
-        for (size_t i = 0; i < pending_leaves_.size(); ++i) {
-            TNode* node = pending_leaves_[i].first;
-            double v0 = values[i];
-            for (int p = 0; p < 4; ++p) node->util[p] = (team_of(p) == 0) ? v0 : -v0;
-            node->has_util = true;
+        if (net_ != nullptr) {
+            build_trees_net_native();
+        } else {
+            std::vector<EuchreState> states;
+            states.reserve(pending_leaves_.size());
+            for (auto& [node, st] : pending_leaves_) states.push_back(st);
+            std::vector<float> values = batch_value_fn_(states);
+            for (size_t i = 0; i < pending_leaves_.size(); ++i) {
+                TNode* node = pending_leaves_[i].first;
+                double v0 = values[i];
+                for (int p = 0; p < 4; ++p) node->util[p] = (team_of(p) == 0) ? v0 : -v0;
+                node->has_util = true;
+            }
         }
         pending_leaves_.clear();
     }

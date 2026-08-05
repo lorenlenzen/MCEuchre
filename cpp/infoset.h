@@ -34,4 +34,11 @@ void observation_tensor(const EuchreState& state, int player, float* out);
 
 std::string infoset_key(const EuchreState& state, int player);
 
+// Fills a caller-provided buffer of size NUM_ACTIONS (zero-initialized by
+// this function) with true at every legal action's flat index, mirroring
+// rebel/train_rebel.py's legal_mask/cpp_legal_mask. Same raw-buffer shape as
+// observation_tensor above, for the same reason: both feed straight into a
+// batched net.policy(obs, legal_mask) call without a Python round-trip.
+void legal_mask(const EuchreState& state, bool* out);
+
 }  // namespace mceuchre

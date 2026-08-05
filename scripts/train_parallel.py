@@ -135,6 +135,7 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         play_exact_frac=cfg["play_exact"],
         play_exact_lead_only=cfg["play_exact_lead_only"],
         play_exact_worlds=cfg["play_exact_worlds"],
+        belief_weight_frac=cfg["belief_weight"],
         equity_model=equity_model,
         engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
@@ -279,6 +280,23 @@ def main():
                          "cheap) silently starved play-exact leads of belief "
                          "coverage too, producing high-variance targets that "
                          "never converged over a full 13-hour run.")
+    ap.add_argument("--belief-weight-frac", type=float, default=0.0,
+                    help="fraction of BIDDING-phase (BidRound1/BidRound2) "
+                         "net-leaf solves that importance-weight sampled "
+                         "worlds by the net's OWN probability for the pass "
+                         "sequence actually observed getting there, instead "
+                         "of sampling them uniformly (cpp.SubgameSolver's "
+                         "belief_weighted; see cpp/belief.cpp's "
+                         "sample_weighted_worlds and docs/rebel_design.md's "
+                         "planned net-native self-play section). Replaces "
+                         "the deleted rebel/belief_model.py heuristic with "
+                         "the net's own belief. Unlike --bid-exact-frac this "
+                         "is always cheap (one extra batched forward pass "
+                         "per solve, not a double-dummy search) -- the "
+                         "fraction is a rollout-risk knob, not a cost one: "
+                         "an undertrained bidding policy makes for a noisy "
+                         "belief signal early on. cpp engine only. Off by "
+                         "default.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero state. Worth it after a change "
@@ -450,6 +468,7 @@ def main():
            "play_exact": args.play_exact_frac,
            "play_exact_lead_only": args.play_exact_lead_only,
            "play_exact_worlds": args.play_exact_worlds,
+           "belief_weight": args.belief_weight_frac,
            "equity_table": equity_table_path,
            "engine": args.engine}
 

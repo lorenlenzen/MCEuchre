@@ -12,6 +12,7 @@ identical NUM_ACTIONS=59 flat index space from euchre/actions.py), with
 full state compared after every single step, not just at the end.
 """
 
+import math
 import random
 
 import pytest
@@ -250,6 +251,33 @@ def test_action_index_roundtrip_matches_python():
         elif isinstance(py_action, Play):
             assert cpp_action.kind == cpp.ActionKind.Play
             assert cpp_action.card == py_action.card.id
+
+
+# --- legal_mask vs rebel.train_rebel.legal_mask -----------------------------
+
+def test_legal_mask_matches_python():
+    """cpp.legal_mask must set exactly the flat indices legal_actions()
+    reports, at every step of a random hand -- the C++ port added so
+    net.policy(obs, legal_mask) can be called without a Python round-trip
+    for legal-mask construction (see docs/rebel_design.md's planned
+    net-native self-play section)."""
+    from rebel.train_rebel import legal_mask as py_legal_mask
+    for seed in range(30):
+        py_st, cpp_st = _deal_both(seed, dealer=seed % 4)
+        rng = random.Random(seed + 200000)
+        steps = 0
+        while not py_st.is_terminal():
+            py_mask = py_legal_mask(py_st)
+            cpp_mask = np.asarray(cpp.legal_mask(cpp_st))
+            assert py_mask.shape == cpp_mask.shape == (cpp.NUM_ACTIONS,)
+            assert np.array_equal(py_mask, cpp_mask), (
+                f"legal_mask mismatch at step {steps} (seed {seed}): "
+                f"py={np.nonzero(py_mask)[0].tolist()} "
+                f"cpp={np.nonzero(cpp_mask)[0].tolist()}")
+            idx = rng.choice(sorted(_legal_action_indices(py_st)))
+            py_st, cpp_st = _apply_index(py_st, cpp_st, idx)
+            steps += 1
+            assert steps <= 100, f"didn't terminate within 100 steps (seed {seed})"
 
 
 # --- observation_tensor / infoset_key vs euchre.infoset --------------------
@@ -889,6 +917,218 @@ def test_subgame_solver_full_solve_matches(seed):
     cpp_value = cpp_solver.root_value()
     assert py_value == pytest.approx(cpp_value, abs=1e-9), (
         f"root_value mismatch seed={seed}: py={py_value} cpp={cpp_value}")
+
+
+# --- SubgameSolver: net-native leaf eval vs the Python-callback BatchValueFn
+# path, on IDENTICAL worlds/weights -- proves build_trees_net_native() (Part
+# B of the planned net-native self-play work; see docs/rebel_design.md)
+# computes byte-identical leaf values to cpp_batch_value_fn_from_net, the
+# per-solve Python callback it replaces on the self-play hot path. Isolates
+# "did porting leaf eval into C++ change the math" from world sampling,
+# which this doesn't touch. -------------------------------------------------
+
+@pytest.mark.parametrize("perspective", [None, 0, 1])
+@pytest.mark.parametrize("seed", range(10))
+def test_subgame_solver_net_native_matches_callback(seed, perspective):
+    from rebel.train_rebel import cpp_batch_value_fn_from_net
+
+    torch.manual_seed(seed)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    dealer, actor, up_id, world_specs = _bidding_worlds(seed, num_worlds=4)
+    _, cpp_root = _build_state_pair(dealer, world_specs[0][0], up_id, world_specs[0][1])
+    cpp_worlds = []
+    for hands_ids, kitty_ids in world_specs:
+        _, c = _build_state_pair(dealer, hands_ids, up_id, kitty_ids)
+        cpp_worlds.append(c)
+    weights = [0.4, 0.3, 0.2, 0.1]
+
+    callback_solver = cpp.SubgameSolver(
+        cpp_root, actor, list(cpp_worlds), list(weights), 5, 2,
+        cpp_batch_value_fn_from_net(net, perspective=perspective), None)
+    native_solver = cpp.SubgameSolver(
+        cpp_root, actor, list(cpp_worlds), list(weights), 5, 2,
+        net.cpp_module, perspective, None)
+
+    cb_policy = callback_solver.root_policy()
+    nn_policy = native_solver.root_policy()
+    assert set(cb_policy) == set(nn_policy)
+    for idx in cb_policy:
+        assert cb_policy[idx] == pytest.approx(nn_policy[idx], abs=1e-6), (
+            f"root_policy[{idx}] mismatch seed={seed} perspective={perspective}: "
+            f"callback={cb_policy[idx]} native={nn_policy[idx]}")
+
+    assert callback_solver.root_value() == pytest.approx(
+        native_solver.root_value(), abs=1e-6), (
+        f"root_value mismatch seed={seed} perspective={perspective}")
+
+
+# --- sample_weighted_worlds: belief-weighted determinization (Part A of the
+# planned net-native self-play work; see docs/rebel_design.md). No Python
+# reference implementation exists (rebel/belief_model.py, the heuristic this
+# replaces, was deleted on purpose this session) -- so instead of a
+# cross-language differential test, this checks (1) properties that must
+# hold regardless of what the net has learned, and (2) that the returned
+# weights match an INDEPENDENT reimplementation of the same algorithm
+# (replay the known pass-prefix, score it with net.policy()) applied to the
+# SAME worlds the C++ side returned -- proving the weighting math itself is
+# right without needing to control sample_determinization's RNG (which,
+# per belief.h, is deliberately not cross-language-identical). -------------
+
+def _reach_bidding_decision(seed, want_phase, want_bids_seen_gt_0=False, max_deals=50):
+    """Deal hands and take PASS at every bidding decision until reaching
+    `want_phase` (BidRound1 or BidRound2) with len(legal_actions()) > 1 --
+    redealing (not retrying mid-hand) on a misdeal or a forced call, so the
+    returned root is always a genuine decision node for its current_player.
+    """
+    rng = random.Random(seed)
+    for _ in range(max_deals):
+        s = cpp.EuchreState.new_hand(dealer=rng.randint(0, 3))
+        deck = list(range(24))
+        rng.shuffle(deck)
+        s = s.deal_from_deck(deck)
+        while True:
+            if s.is_terminal():
+                break
+            if s.phase == want_phase and len(s.legal_actions()) > 1:
+                if not want_bids_seen_gt_0 or s.bids_seen > 0:
+                    return s
+            pass_action = next((a for a in s.legal_actions()
+                               if a.kind == cpp.ActionKind.Pass), None)
+            if pass_action is None:
+                break  # stick-the-dealer forced call; redeal
+            s = s.apply(pass_action)
+    raise RuntimeError(f"couldn't reach phase={want_phase} in {max_deals} deals")
+
+
+def _independent_weights(root, worlds, net, weight_floor):
+    """Python-side reimplementation of belief.cpp's sample_weighted_worlds
+    weighting step (NOT its world sampling -- takes worlds as given), used
+    to verify the C++ math independently."""
+    pass_idx = cpp.Action.pass_().index()
+    n_round1 = 4 if root.phase == cpp.Phase.BidRound2 else root.bids_seen
+    n_round2 = root.bids_seen if root.phase == cpp.Phase.BidRound2 else 0
+    steps = n_round1 + n_round2
+
+    log_w = []
+    for w in worlds:
+        replay = cpp.EuchreState.new_hand(
+            dealer=root.dealer, stick_the_dealer=root.stick_the_dealer,
+            team0_score=root.team0_score, team1_score=root.team1_score
+        ).deal_from(list(w.hands), w.up_card, list(w.kitty))
+        lw = 0.0
+        for _ in range(steps):
+            obs = torch.from_numpy(np.asarray(
+                cpp.observation_tensor(replay, replay.current_player))).unsqueeze(0)
+            mask = torch.from_numpy(np.asarray(cpp.legal_mask(replay))).unsqueeze(0)
+            with torch.no_grad():
+                probs = net.policy(obs, mask)
+            p = max(float(probs[0, pass_idx]), 1e-6)
+            lw += math.log(p)
+            replay = replay.apply(cpp.Action.pass_())
+        log_w.append(lw)
+
+    m = max(log_w)
+    raw = [math.exp(l - m) for l in log_w]
+    total = sum(raw)
+    n = len(worlds)
+    uniform = 1.0 / n
+    floored = [max(x / total, weight_floor * uniform) for x in raw]
+    total2 = sum(floored)
+    return [x / total2 for x in floored]
+
+
+@pytest.mark.parametrize("phase,bids_seen_gt_0", [
+    (cpp.Phase.BidRound1, False),
+    (cpp.Phase.BidRound1, True),
+    (cpp.Phase.BidRound2, False),
+    (cpp.Phase.BidRound2, True),
+])
+@pytest.mark.parametrize("seed", range(5))
+def test_sample_weighted_worlds_matches_independent_reimplementation(seed, phase, bids_seen_gt_0):
+    torch.manual_seed(seed + 1000)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    root = _reach_bidding_decision(seed, phase, bids_seen_gt_0)
+    actor = root.current_player
+
+    worlds, weights = cpp.sample_weighted_worlds(
+        root, actor, 6, net.cpp_module, seed=seed + 2000, weight_floor=0.05)
+
+    assert len(worlds) == len(weights) == 6
+    assert sum(weights) == pytest.approx(1.0, abs=1e-9)
+
+    expected = _independent_weights(root, worlds, net, weight_floor=0.05)
+    for got, exp in zip(weights, expected):
+        assert got == pytest.approx(exp, abs=1e-5), (
+            f"weight mismatch seed={seed} phase={phase}: {weights} vs {expected}")
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_sample_weighted_worlds_respects_floor(seed):
+    """No world's weight can fall below weight_floor * uniform, however
+    confidently the net disagrees with it."""
+    torch.manual_seed(seed)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    root = _reach_bidding_decision(seed, cpp.Phase.BidRound2, want_bids_seen_gt_0=True)
+    actor = root.current_player
+    n = 10
+    floor = 0.1
+    _, weights = cpp.sample_weighted_worlds(
+        root, actor, n, net.cpp_module, seed=seed, weight_floor=floor)
+    uniform = 1.0 / n
+    for w in weights:
+        assert w >= floor * uniform - 1e-9
+
+
+def test_sample_weighted_worlds_uniform_when_nothing_observed():
+    """First-to-act in round 1 (bids_seen == 0, not yet BidRound2): no bids
+    to condition on, so weights must be exactly uniform."""
+    torch.manual_seed(0)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    root = _reach_bidding_decision(0, cpp.Phase.BidRound1, want_bids_seen_gt_0=False)
+    assert root.bids_seen == 0
+    n = 7
+    worlds, weights = cpp.sample_weighted_worlds(root, root.current_player, n, net.cpp_module, seed=0)
+    assert len(worlds) == n
+    assert weights == pytest.approx([1.0 / n] * n)
+
+
+def test_sample_weighted_worlds_rejects_non_bidding_root():
+    torch.manual_seed(0)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    py_st, cpp_st = _walk_to_play(0, dealer=0, min_cards_left=3)
+    with pytest.raises(Exception):
+        cpp.sample_weighted_worlds(cpp_st, cpp_st.current_player, 4, net.cpp_module, seed=0)
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_subgame_solver_belief_weighted_matches_uniform_when_untrained_ish(seed):
+    """belief_weighted=True must still produce a complete, legal solve (not
+    just a plausible one) -- root_policy covers exactly the actor's legal
+    actions and sums to 1, for both a BidRound1 and BidRound2 root."""
+    torch.manual_seed(seed)
+    net = cpp.PolicyValueNet()
+    net.eval()
+
+    phase = cpp.Phase.BidRound1 if seed % 2 == 0 else cpp.Phase.BidRound2
+    root = _reach_bidding_decision(seed, phase, want_bids_seen_gt_0=True)
+    actor = root.current_player
+
+    solver = cpp.SubgameSolver(root, actor, 6, 10, 2, net.cpp_module, actor, True, None, seed)
+    solver.run()
+    policy = solver.root_policy()
+    legal_idxs = {a.index() for a in root.legal_actions()}
+    assert set(policy) == legal_idxs
+    assert sum(policy.values()) == pytest.approx(1.0, abs=1e-6)
 
 
 # --- PolicyValueNet: torch::nn::Module port vs rebel.networks -------------

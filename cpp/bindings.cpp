@@ -22,11 +22,24 @@ static py::array_t<float> py_observation_tensor(const EuchreState& state, int pl
     return arr;
 }
 
+static py::array_t<bool> py_legal_mask(const EuchreState& state) {
+    py::array_t<bool> arr(NUM_ACTIONS);
+    legal_mask(state, arr.mutable_data());
+    return arr;
+}
+
 static int py_solve_value(const EuchreState& state) { return solve_value(state); }
 
 static EuchreState py_sample_determinization(const EuchreState& state, int player, uint64_t seed) {
     std::mt19937_64 rng(seed);
     return sample_determinization(state, player, rng);
+}
+
+static std::pair<std::vector<EuchreState>, std::vector<double>>
+py_sample_weighted_worlds(const EuchreState& state, int actor, int num_worlds,
+                          PolicyValueNetImpl& net, uint64_t seed, double weight_floor) {
+    std::mt19937_64 rng(seed);
+    return sample_weighted_worlds(state, actor, num_worlds, net, rng, weight_floor);
 }
 
 PYBIND11_MODULE(mceuchre_cpp, m) {
@@ -116,6 +129,7 @@ PYBIND11_MODULE(mceuchre_cpp, m) {
 
     m.def("observation_tensor", &py_observation_tensor, py::arg("state"), py::arg("player"));
     m.def("infoset_key", &infoset_key, py::arg("state"), py::arg("player"));
+    m.def("legal_mask", &py_legal_mask, py::arg("state"));
     m.attr("OBS_SIZE") = OBS_SIZE;
     m.attr("GLOBAL_DIM") = GLOBAL_DIM;
     m.attr("SUIT_BLOCK_DIM") = SUIT_BLOCK_DIM;
@@ -134,8 +148,33 @@ PYBIND11_MODULE(mceuchre_cpp, m) {
 
     m.def("sample_determinization", &py_sample_determinization,
          py::arg("state"), py::arg("player"), py::arg("seed"));
+    m.def("sample_weighted_worlds", &py_sample_weighted_worlds,
+         py::arg("state"), py::arg("actor"), py::arg("num_worlds"), py::arg("net"),
+         py::arg("seed"), py::arg("weight_floor") = 0.05);
 
     py::class_<SubgameSolver>(m, "SubgameSolver")
+        // Net-native constructors registered FIRST: a bound PolicyValueNet
+        // instance is technically Python-callable (nn.Module.__call__), so
+        // if the BatchValueFn overloads below were tried first, pybind's
+        // permissive std::function caster could wrongly accept it there
+        // instead of matching the PolicyValueNetImpl& overload. Registration
+        // order is pybind's overload-resolution order, so trying the
+        // specific-type overloads first avoids that.
+        .def(py::init<const EuchreState&, int, int, int, int, PolicyValueNetImpl&,
+                      c10::optional<int>, bool, const MatchEquityModel*, uint64_t>(),
+            py::arg("root"), py::arg("actor"), py::arg("num_worlds"), py::arg("iterations"),
+            py::arg("depth_limit"), py::arg("net"), py::arg("perspective") = c10::nullopt,
+            py::arg("belief_weighted") = false,
+            py::arg("equity_model") = nullptr, py::arg("seed") = 0,
+            py::keep_alive<1, 6>(),   // keep net alive as long as the solver is
+            py::keep_alive<1, 9>())  // keep equity_model alive as long as the solver is
+        .def(py::init<const EuchreState&, int, std::vector<EuchreState>, std::vector<double>,
+                      int, int, PolicyValueNetImpl&, c10::optional<int>,
+                      const MatchEquityModel*>(),
+            py::arg("root"), py::arg("actor"), py::arg("worlds"), py::arg("weights"),
+            py::arg("iterations"), py::arg("depth_limit"), py::arg("net"),
+            py::arg("perspective") = c10::nullopt, py::arg("equity_model") = nullptr,
+            py::keep_alive<1, 7>(), py::keep_alive<1, 9>())
         .def(py::init<const EuchreState&, int, int, int, int, BatchValueFn,
                       const MatchEquityModel*, uint64_t>(),
             py::arg("root"), py::arg("actor"), py::arg("num_worlds"), py::arg("iterations"),
