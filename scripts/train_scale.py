@@ -228,7 +228,7 @@ def main() -> None:
                          "404-hand run over 14 actors leaves each buffer "
                          "2.9%% full, so nothing would ever be selected on "
                          "difficulty at all.")
-    ap.add_argument("--plr-warmup-hands", type=int, default=50,
+    ap.add_argument("--plr-warmup-hands", type=int, default=10,
                     help="(PLR) deal fresh (never replay) for this many "
                          "hands first, so replays start from a real "
                          "population instead of the one or two deals that "
@@ -236,7 +236,12 @@ def main() -> None:
                          "hands are ordinary self-play hands, trained on and "
                          "scored as usual -- only replay is suppressed. Also "
                          "lets the typical-loss level calibrate before the "
-                         "admission gate starts refusing hands.")
+                         "admission gate starts refusing hands. Kept small: "
+                         "warmup hands cost the same as any other hand "
+                         "(~2 min at 24 worlds / 60 CFR iters), so 100 is "
+                         "hours per actor -- and since `typical` is now fed "
+                         "only by first-encounter deals it calibrates within "
+                         "~30 hands regardless, measured.")
     ap.add_argument("--plr-dump-top", type=int, default=25,
                     help="(PLR) how many of the hardest stored deals to "
                          "write to <out>.plr.json, rendered readably with "

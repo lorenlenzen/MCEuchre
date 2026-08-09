@@ -216,7 +216,7 @@ class PLRBuffer:
     def __init__(self, capacity: int = 250, replay_prob: float = 0.5,
                  temperature: float = 1.0, staleness_coef: float = 0.3,
                  typical_ema: float = 0.01, min_score_ratio: float = 1.0,
-                 warmup: int = 50,
+                 warmup: int = 10,
                  rng: Optional[random.Random] = None) -> None:
         if not 0.0 <= replay_prob <= 1.0:
             raise ValueError(f"replay_prob must be in [0, 1], got {replay_prob}")
@@ -251,12 +251,20 @@ class PLRBuffer:
         # ordinary self-play hands, trained on as usual and scored into the
         # buffer -- the only thing suppressed is replay.
         #
-        # Two things this buys. `typical` gets a genuine sample before the
-        # admission gate starts turning hands away (see the bias correction
-        # in update). And it bounds the early-lock-in failure: replay_prob
-        # near 1.0 otherwise stores hand 1 and replays only that forever,
-        # since new deals arrive solely via the non-replay path; with warmup
-        # the buffer at least reaches `warmup` deals first.
+        # Deliberately SMALL. Warmup is ordinary full-cost self-play -- a
+        # hand costs whatever a hand costs (~2 min at 24 worlds / 60 CFR
+        # iters), so 100 warmup hands is hours per actor, and there is no
+        # cheap shortcut: a deal's score is the per-sample loss against its
+        # CFR targets, so producing one means actually solving the hand.
+        #
+        # It also does less than it used to. Calibrating `typical` was its
+        # main job, and that is now handled by feeding `typical` only
+        # first-encounter deals plus the bias-corrected weight (see update):
+        # measured, `typical` reaches ~1.0 within 30 hands at warmup 0, 10,
+        # 25 or 100 alike. What remains is minor -- a slightly fuller buffer
+        # before replays begin, and a bound on the replay_prob-near-1.0
+        # lock-in (1 distinct deal -> `warmup` deals), which only matters at
+        # settings that are already degenerate.
         self.warmup = warmup
         self._n_obs = 0
         # Running "what does a hand cost right now" level, as an EMA of every
