@@ -703,7 +703,11 @@ def test_play_exact_worlds_defaults_to_num_worlds_not_bid_exact_worlds():
     from unittest.mock import patch
     from rebel.subgame import SubgameSolver
     seen_worlds = []
-    tr = ReBeLTrainer(num_worlds=24, cfr_iterations=4, depth_limit=4,
+    # num_worlds kept small on purpose: with bid/play_exact_frac at 1.0 every
+    # decision is a real double-dummy solve, so worlds drive runtime directly.
+    # The assertion only needs bid_exact_worlds (4) to differ from the
+    # play-exact fallback, so 8 proves the point exactly as well as 24 did.
+    tr = ReBeLTrainer(num_worlds=8, cfr_iterations=2, depth_limit=3,
                       full_depth_cards=0, bid_exact_frac=1.0, bid_exact_worlds=4,
                       play_exact_frac=1.0, seed=2)  # play_exact_worlds left None
 
@@ -719,18 +723,18 @@ def test_play_exact_worlds_defaults_to_num_worlds_not_bid_exact_worlds():
 
     assert seen_worlds, "no solves were run"
     # every solve should be either the bid-exact override (4), the (unset,
-    # so num_worlds-falling-back) play-exact value (24), or plain net solves
-    # (24) -- specifically, 4 must NEVER appear for a PLAY solve.
+    # so num_worlds-falling-back) play-exact value (8), or plain net solves
+    # (8) -- specifically, 4 must NEVER appear for a PLAY solve.
     assert any(w == 4 for w in seen_worlds), \
         "expected at least one bid-exact solve at bid_exact_worlds=4"
-    assert all(w in (4, 24) for w in seen_worlds), seen_worlds
+    assert all(w in (4, 8) for w in seen_worlds), seen_worlds
 
 
 def test_play_exact_worlds_overrides_independently_of_bid_exact_worlds():
     from unittest.mock import patch
     from rebel.subgame import SubgameSolver
     seen_worlds = []
-    tr = ReBeLTrainer(num_worlds=24, cfr_iterations=4, depth_limit=4,
+    tr = ReBeLTrainer(num_worlds=10, cfr_iterations=2, depth_limit=3,
                       full_depth_cards=0, bid_exact_frac=1.0, bid_exact_worlds=4,
                       play_exact_frac=1.0, play_exact_worlds=6, seed=2)
 
@@ -746,4 +750,4 @@ def test_play_exact_worlds_overrides_independently_of_bid_exact_worlds():
 
     assert 6 in seen_worlds, seen_worlds          # play-exact's own override
     assert 4 in seen_worlds, seen_worlds           # bid-exact's override, untouched
-    assert all(w in (4, 6, 24) for w in seen_worlds), seen_worlds
+    assert all(w in (4, 6, 10) for w in seen_worlds), seen_worlds

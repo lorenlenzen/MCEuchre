@@ -82,8 +82,11 @@ def test_update_refreshes_rather_than_duplicates():
     """Re-scoring a replayed deal must overwrite its score, not insert a
     second copy -- otherwise the buffer fills with duplicates of whatever
     gets replayed most. (Stored scores are ratios to the running typical
-    level, so assert on the drop, not on the raw number.)"""
-    buf = PLRBuffer(capacity=10, typical_ema=0.01, rng=random.Random(0))
+    level, so assert on the drop, not on the raw number. The gate is off
+    here so the re-score exercises refresh rather than graduation, which
+    test_learned_deals_graduate_out_of_the_buffer covers.)"""
+    buf = PLRBuffer(capacity=10, typical_ema=0.01, min_score_ratio=0.0,
+                    rng=random.Random(0))
     s = _spec(1)
     buf.update(s, 5.0)
     high = buf.stats()["score_max"]
@@ -112,8 +115,10 @@ def test_capacity_evicts_the_weakest_only_when_beaten():
 
 def test_sampling_favours_high_score_deals():
     """The whole point: high-loss deals must be drawn more often. Staleness
-    off here so this measures prioritization alone."""
-    buf = PLRBuffer(capacity=10, staleness_coef=0.0, rng=random.Random(0))
+    and the admission gate are both off here so this measures sampling
+    prioritization alone."""
+    buf = PLRBuffer(capacity=10, staleness_coef=0.0, min_score_ratio=0.0,
+                    rng=random.Random(0))
     best = _spec(0)
     buf.update(best, 100.0)
     for i in range(1, 10):
@@ -127,7 +132,8 @@ def test_staleness_prevents_collapse_onto_one_deal():
     """Without a staleness term the buffer fixates on early high scorers
     whose scores were measured against a long-obsolete net. With it, every
     stored deal should eventually come up."""
-    buf = PLRBuffer(capacity=5, staleness_coef=0.5, rng=random.Random(0))
+    buf = PLRBuffer(capacity=5, staleness_coef=0.5, min_score_ratio=0.0,
+                    rng=random.Random(0))
     specs = [_spec(i) for i in range(5)]
     buf.update(specs[0], 100.0)
     for s in specs[1:]:
@@ -230,6 +236,223 @@ def test_score_samples_matches_train_step_loss(engine):
 def test_score_samples_handles_empty():
     trainer = ReBeLTrainer(seed=0)
     assert score_samples(trainer.net, []) == 0.0
+
+
+# --- warmup: populate before replaying ------------------------------------
+
+def test_warmup_suppresses_replay_until_the_buffer_is_populated():
+    buf = PLRBuffer(capacity=100, replay_prob=1.0, warmup=20,
+                    min_score_ratio=0.0, rng=random.Random(0))
+    for i in range(19):
+        assert not buf.should_replay(), f"replayed during warmup at hand {i}"
+        buf.update(_spec(i), 1.0)
+    buf.update(_spec(19), 1.0)          # 20th observation completes warmup
+    assert buf.should_replay()
+
+
+def test_warmup_bounds_the_replay_prob_one_lock_in():
+    """replay_prob=1.0 still can't grow the buffer afterwards, but warmup
+    means it locks onto `warmup` deals rather than a single one."""
+    for warm, expect in ((0, 1), (40, 40)):
+        buf = PLRBuffer(capacity=250, replay_prob=1.0, warmup=warm,
+                        min_score_ratio=0.0, rng=random.Random(0))
+        for i in range(300):
+            spec = buf.sample() if buf.should_replay() else _spec(i)
+            buf.update(spec, 1.0)
+        assert len(buf) == expect
+
+
+def test_replays_do_not_inflate_typical():
+    """`typical` must mean "what an average FRESH hand costs". Stored deals
+    were selected for being hard, so re-scoring them must not feed the
+    estimate -- otherwise typical drifts up, the gate (a multiple of it)
+    tightens, fewer new deals are admitted, and more replays follow: a
+    feedback loop. Measured at ~1.21 against a true level of 1.0 before the
+    first-encounter-only rule."""
+    buf = PLRBuffer(capacity=20, min_score_ratio=0.0, rng=random.Random(0))
+    fresh = [_spec(i) for i in range(20)]
+    for s in fresh:
+        buf.update(s, 1.0)                       # fresh deals: level 1.0
+    baseline = buf.stats()["typical"]
+    for _ in range(200):                         # many replays, all scoring high
+        buf.update(fresh[0], 5.0)
+    assert buf.stats()["typical"] == pytest.approx(baseline), (
+        f"replays moved typical {baseline:.3f} -> {buf.stats()['typical']:.3f}")
+
+
+def test_typical_is_not_anchored_to_the_first_hand():
+    """Bias correction: a plain 1% EMA would leave `typical` dominated by
+    hand 1 for ~100 hands, so the admission gate would spend that stretch
+    calibrated to one arbitrary deal."""
+    buf = PLRBuffer(min_score_ratio=0.0, typical_ema=0.01, rng=random.Random(0))
+    buf.update(_spec(0), 5.0)           # an unrepresentative first hand
+    for i in range(1, 30):
+        buf.update(_spec(i), 1.0)
+    assert buf.stats()["typical"] < 1.5, (
+        f"typical={buf.stats()['typical']:.2f} is still anchored to hand 1")
+
+
+# --- admission gate: a struggle-finder, not a recency cache ---------------
+
+def test_easy_hands_are_refused_even_when_there_is_room():
+    """The gate is what makes this PLR rather than "replay recent hands".
+    Textbook PLR admits unconditionally until full, which is fine when the
+    buffer is small relative to levels seen -- but a per-actor buffer here
+    is huge relative to hands per actor (a 404-hand run over 14 actors
+    leaves each buffer ~3% full), so without a gate NOTHING is ever
+    selected on difficulty."""
+    buf = PLRBuffer(capacity=100, typical_ema=1e-6, min_score_ratio=1.0,
+                    rng=random.Random(0))
+    buf.update(_spec(0), 1.0)                 # sets typical ~= 1.0
+    assert buf.update(_spec(1), 0.4) is False, "easy hand took a free slot"
+    assert buf.update(_spec(2), 1.6) is True, "hard hand refused"
+    assert len(buf) == 2
+    assert buf.stats()["rejected"] == 1
+
+
+def test_learned_deals_graduate_out_of_the_buffer():
+    """A stored deal that stops clearing the admission bar has been learned
+    and must leave. Previously a refresh kept it unconditionally, so a
+    mastered hand held its slot forever: eviction only fires when the buffer
+    is FULL and something better arrives, so in an unfilled buffer nothing
+    ever left, and the staleness term kept re-drawing it."""
+    buf = PLRBuffer(capacity=50, min_score_ratio=1.0, typical_ema=1e-6,
+                    warmup=0, rng=random.Random(0))
+    buf.update(_spec(0), 1.0)                       # sets typical ~= 1.0
+    hard = _spec(1)
+    assert buf.update(hard, 1.8) is True            # admitted: 1.8x typical
+    assert buf.update(hard, 1.5) is True            # still hard: retained
+    assert hard in buf._entries
+    assert buf.update(hard, 0.4) is False           # learned: graduated out
+    assert hard not in buf._entries
+    assert buf.stats()["graduated"] == 1
+
+
+def test_buffer_may_drain_when_everything_is_learned():
+    """Draining is a legitimate outcome, not a failure -- it just means
+    fresh dealing resumes until hard hands turn up again."""
+    buf = PLRBuffer(capacity=50, min_score_ratio=1.0, typical_ema=1e-6,
+                    warmup=0, rng=random.Random(0))
+    buf.update(_spec(0), 1.0)
+    specs = [_spec(i) for i in range(1, 11)]
+    for s in specs:
+        buf.update(s, 2.0)
+    assert len(buf) == 11
+    for s in specs:                                  # the net learns them all
+        buf.update(s, 0.2)
+    assert len(buf) == 1                             # only the seed remains
+    assert buf.stats()["graduated"] == 10
+
+
+def test_gate_zero_restores_unconditional_admission():
+    buf = PLRBuffer(capacity=100, typical_ema=1e-6, min_score_ratio=0.0,
+                    rng=random.Random(0))
+    buf.update(_spec(0), 1.0)
+    assert buf.update(_spec(1), 0.01) is True
+    assert buf.stats()["rejected"] == 0
+
+
+def test_gate_keeps_only_above_typical_hands_over_a_run():
+    """End to end: with scores drawn around a typical of 1.0, a gated buffer
+    should admit roughly the harder half and reject the rest."""
+    buf = PLRBuffer(capacity=500, replay_prob=0.0, min_score_ratio=1.0,
+                    rng=random.Random(0))
+    rng = random.Random(1)
+    for i in range(400):
+        buf.update(_spec(i), max(0.05, rng.gauss(1.0, 0.3)))
+    s = buf.stats()
+    assert s["rejected"] > 100, "gate admitted nearly everything"
+    assert s["size"] > 50, "gate admitted almost nothing"
+    assert s["size"] + s["rejected"] == 400
+
+
+# --- buffer inspection: which hands need more training --------------------
+
+def test_replay_prob_one_starves_the_buffer():
+    """Documents a real footgun rather than pretending it away: new deals
+    only reach the buffer on NON-replay hands, so replay_prob=1.0 stores the
+    first hand and then replays it forever. Both scripts warn about this.
+
+    warmup=0 here to show the raw mechanism -- the default warmup bounds the
+    damage (see test_warmup_bounds_the_replay_prob_one_lock_in) but does not
+    remove it: the buffer still cannot grow past `warmup` entries."""
+    from rebel.plr import PLRBuffer as B
+    for prob, expect in ((1.0, 1), (0.5, None)):
+        buf = B(capacity=50, replay_prob=prob, min_score_ratio=0.0, warmup=0,
+                rng=random.Random(0))
+        for i in range(200):
+            spec = buf.sample() if buf.should_replay() else _spec(i)
+            buf.update(spec, score=1.0)
+        if expect is not None:
+            assert len(buf) == expect, (
+                f"replay_prob={prob} should freeze the buffer at {expect}")
+        else:
+            assert len(buf) > 10, "a moderate replay_prob must still grow"
+
+
+def test_describe_spec_is_readable_and_role_labelled():
+    from rebel.plr import describe_spec
+    from euchre.cards import Card, Rank, Suit, same_color_suit
+
+    up = Card(Suit.DIAMONDS, Rank.QUEEN)
+    spec = _spec(4)._replace(dealer=0, up_card=up.id)
+    d = describe_spec(spec)
+
+    assert d["up_card"].endswith("(U)"), d["up_card"]
+    assert d["up_card"].startswith("QD")
+    # Every seat is named by POSITION, not absolute index.
+    assert set(d["hands_by_position"]) == {"first", "second", "third", "dealer"}
+    # Every card carries exactly one role tag, and all four roles are used
+    # across the deck.
+    tags = set()
+    for hand in d["hands_by_position"].values():
+        for card in hand.split():
+            assert card[-1] == ")" and card[-3] == "("
+            tags.add(card[-2])
+    assert tags <= {"U", "N", "G", "g"}
+
+
+def test_describe_spec_next_role_follows_up_card_colour():
+    from rebel.plr import describe_spec
+    from euchre.cards import Card, Rank, Suit, same_color_suit
+
+    for up_suit in Suit:
+        spec = _spec(9)._replace(dealer=0, up_card=Card(up_suit, Rank.NINE).id)
+        d = describe_spec(spec)
+        nxt = same_color_suit(up_suit)
+        joined = " ".join(d["hands_by_position"].values())
+        for card in joined.split():
+            suit_ch = card[1]
+            role = card[-2]
+            suit = "CDHS".index(suit_ch)
+            if suit == int(up_suit):
+                assert role == "U", card
+            elif suit == int(nxt):
+                assert role == "N", card
+            else:
+                assert role in ("G", "g"), card
+
+
+def test_top_is_ordered_hardest_first():
+    buf = PLRBuffer(capacity=10, typical_ema=1e-6, rng=random.Random(0))
+    for i, sc in enumerate([1.0, 5.0, 3.0]):
+        buf.update(_spec(i), sc)
+    scores = [e["score"] for e in buf.top(3)]
+    assert scores == sorted(scores, reverse=True)
+    assert len(buf.top(2)) == 2
+
+
+def test_dump_writes_stats_and_hardest(tmp_path):
+    import json
+    buf = PLRBuffer(capacity=10, rng=random.Random(0))
+    for i in range(4):
+        buf.update(_spec(i), 1.0 + i)
+    p = tmp_path / "b.json"
+    buf.dump(str(p), n=2)
+    d = json.loads(p.read_text())
+    assert d["stats"]["size"] == 4
+    assert len(d["hardest"]) == 2
+    assert "hands_by_position" in d["hardest"][0]
 
 
 # --- integration: replay actually re-plays the stored deal ----------------

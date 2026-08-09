@@ -135,6 +135,51 @@ def score_samples(net, samples: Sequence) -> float:
         return float((per_policy + per_value).mean())
 
 
+_RANK_CH = {9: "9", 10: "T", 11: "J", 12: "Q", 13: "K", 14: "A"}
+_SUIT_CH = "CDHS"  # euchre/cards.py Suit ordering
+
+
+def card_str(card_id: int) -> str:
+    """ASCII "JS" / "TD" for a card id, matching --require's rank letters.
+    Card.__str__ uses unicode suit symbols, which fail to encode on the
+    default Windows console codepage."""
+    from euchre.cards import Card
+    c = Card.from_id(int(card_id))
+    return f"{_RANK_CH[int(c.rank)]}{_SUIT_CH[int(c.suit)]}"
+
+
+def describe_spec(spec: "DealSpec") -> Dict[str, Any]:
+    """A DealSpec rendered for human reading.
+
+    Hands are keyed by SEAT POSITION (first/second/third/dealer) rather than
+    absolute seat index: position is what the strategy actually depends on,
+    and it's the same vocabulary --seat and the quiz use. Suits are also
+    labelled by role relative to the up-card (U/N/G/g, as in --require), so
+    a recurring pattern in these dumps can be turned straight into a
+    --require string.
+    """
+    from euchre.cards import same_color_suit
+    up_suit = int(spec.up_card) // 6
+    nxt = int(same_color_suit(up_suit))
+    greens = [s for s in range(4) if s not in (up_suit, nxt)]
+    role = {up_suit: "U", nxt: "N", greens[0]: "G", greens[1]: "g"}
+    names = {1: "first", 2: "second", 3: "third", 4: "dealer"}
+
+    hands = {}
+    for seat in range(4):
+        pos = (seat - spec.dealer - 1) % 4 + 1
+        cards = sorted(spec.hands[seat], key=lambda c: (c // 6, c % 6))
+        hands[names[pos]] = " ".join(
+            f"{card_str(c)}({role[c // 6]})" for c in cards)
+    return {
+        "dealer_seat": spec.dealer,
+        "up_card": f"{card_str(spec.up_card)}({role[up_suit]})",
+        "score_team0_team1": [spec.team0_score, spec.team1_score],
+        "stick_the_dealer": spec.stick_the_dealer,
+        "hands_by_position": hands,
+    }
+
+
 class _Entry:
     __slots__ = ("spec", "score", "last_used")
 
@@ -168,9 +213,10 @@ class PLRBuffer:
     harder deals from displacing it.
     """
 
-    def __init__(self, capacity: int = 1000, replay_prob: float = 0.5,
+    def __init__(self, capacity: int = 250, replay_prob: float = 0.5,
                  temperature: float = 1.0, staleness_coef: float = 0.3,
-                 typical_ema: float = 0.01,
+                 typical_ema: float = 0.01, min_score_ratio: float = 1.0,
+                 warmup: int = 50,
                  rng: Optional[random.Random] = None) -> None:
         if not 0.0 <= replay_prob <= 1.0:
             raise ValueError(f"replay_prob must be in [0, 1], got {replay_prob}")
@@ -186,6 +232,33 @@ class PLRBuffer:
         self.temperature = temperature
         self.staleness_coef = staleness_coef
         self.typical_ema = typical_ema
+        # Admission gate: a NEW deal must score at least this multiple of the
+        # running typical loss to earn a slot at all. Without it (0.0),
+        # admission is unconditional until the buffer is full -- textbook
+        # PLR, but PLR's buffers are small relative to the levels it sees,
+        # while a per-actor buffer here is huge relative to hands per actor.
+        # Measured: a 404-hand run across 14 actors leaves each buffer 2.9%
+        # full, so NOTHING is ever selected on difficulty and the buffer is
+        # just "recent hands"; even a 13-hour run spends ~48% of itself
+        # filling. 1.0 = "harder than an average hand right now", which is
+        # the property that makes this a struggle-finder rather than a
+        # recency cache. Scores are already normalized to `typical` (see
+        # update), so the ratio is directly comparable across training eras.
+        self.min_score_ratio = min_score_ratio
+        # Deal fresh (never replay) for this many hands, so replays start
+        # from a real population rather than from whatever one or two deals
+        # happened to land first. Nothing is wasted during warmup: those are
+        # ordinary self-play hands, trained on as usual and scored into the
+        # buffer -- the only thing suppressed is replay.
+        #
+        # Two things this buys. `typical` gets a genuine sample before the
+        # admission gate starts turning hands away (see the bias correction
+        # in update). And it bounds the early-lock-in failure: replay_prob
+        # near 1.0 otherwise stores hand 1 and replays only that forever,
+        # since new deals arrive solely via the non-replay path; with warmup
+        # the buffer at least reaches `warmup` deals first.
+        self.warmup = warmup
+        self._n_obs = 0
         # Running "what does a hand cost right now" level, as an EMA of every
         # raw score observed. Stored scores are kept RELATIVE to this (see
         # update), because absolute losses drift a lot over training: a deal
@@ -204,14 +277,26 @@ class PLRBuffer:
         self.n_replayed = 0
         self.n_inserted = 0
         self.n_evicted = 0
+        self.n_rejected = 0   # new deals turned away by min_score_ratio
+        self.n_graduated = 0  # stored deals dropped once the net learned them
 
     def __len__(self) -> int:
         return len(self._entries)
 
     def should_replay(self) -> bool:
         """True if this hand should replay a stored deal rather than deal a
-        fresh one. Always False while the buffer is empty."""
-        if not self._entries:
+        fresh one. Always False while the buffer is empty.
+
+        Note the coupling this creates: NEW deals reach the buffer only via
+        the non-replay path, so `replay_prob` also caps how fast the buffer
+        can grow. At 1.0 it never grows at all -- the first dealt hand is
+        stored and then replayed forever, since there is no remaining path
+        that deals a fresh one (measured: 1 distinct deal over 300 hands, vs
+        38 at 0.9 and a full 100-slot buffer at 0.5). Values at or near 1.0
+        are a degenerate lock, not aggressive prioritization; both training
+        scripts warn about it.
+        """
+        if not self._entries or self._n_obs < self.warmup:
             return False
         return self.rng.random() < self.replay_prob
 
@@ -269,17 +354,61 @@ class PLRBuffer:
         # (exactly 1.0 at typical_ema=1.0), which would silently disable the
         # normalization entirely -- caught by
         # test_stale_high_scores_do_not_block_fresher_harder_deals.
-        baseline = self._typical if self._typical is not None else score
-        self._typical = (score if self._typical is None
-                         else (1.0 - self.typical_ema) * self._typical
-                              + self.typical_ema * score)
-        score = score / max(baseline, 1e-9)
+        #
         self._step += 1
         existing = self._entries.get(spec)
+
+        # `typical` must mean "what an average FRESH hand costs", so only
+        # first-encounter deals feed it. Re-scoring a stored deal must not:
+        # stored deals were selected for being hard, so folding their scores
+        # back in inflates `typical`, which raises the gate (a multiple of
+        # it), which admits fewer new deals, which leaves more replays --
+        # a feedback loop that tightens the gate over the whole run.
+        # Measured before this fix: `typical` settled at ~1.21 against a
+        # true fresh-deal level of 1.0, i.e. a gate ~20% stricter than
+        # intended, and warmup only postponed it rather than fixing it.
+        #
+        # Bias-corrected weight: a plain EMA at 1% would leave `typical`
+        # anchored to the FIRST hand's score for ~100 hands (0.99^100 ~ 0.37
+        # of the initial value still present), so the admission gate would
+        # spend that whole stretch calibrated to one arbitrary deal. Using
+        # max(ema, 1/n) makes the early observations a true running mean and
+        # only settles into the fixed EMA once n is large enough for it to
+        # be the slower -- standard bias correction, and it means the gate
+        # is meaningful from roughly the first dozen hands instead of the
+        # first hundred.
+        if existing is None:
+            self._n_obs += 1
+            w = max(self.typical_ema, 1.0 / self._n_obs)
+            baseline = self._typical if self._typical is not None else score
+            self._typical = (score if self._typical is None
+                             else (1.0 - w) * self._typical + w * score)
+        else:
+            baseline = self._typical if self._typical is not None else score
+        score = score / max(baseline, 1e-9)
         if existing is not None:
+            # A stored deal that no longer clears the admission bar has been
+            # LEARNED -- drop it. Refreshing it in place (the old behaviour)
+            # meant a mastered hand kept its slot indefinitely: eviction only
+            # fires when the buffer is FULL and something better arrives, so
+            # in an unfilled buffer nothing ever left, and the staleness term
+            # kept re-drawing it. Graduating it out is what makes the buffer
+            # track "what the net struggles with NOW" rather than "what it
+            # struggled with once". A draining buffer is a legitimate
+            # outcome, not a failure -- it means fresh dealing resumes until
+            # genuinely hard hands turn up again.
+            if score < self.min_score_ratio:
+                del self._entries[spec]
+                self.n_graduated += 1
+                return False
             existing.score = score
             existing.last_used = self._step
             return True
+        # Difficulty gate before the capacity check: an easy hand shouldn't
+        # take a slot just because one happens to be free.
+        if score < self.min_score_ratio:
+            self.n_rejected += 1
+            return False
         if len(self._entries) < self.capacity:
             self._entries[spec] = _Entry(spec, score, self._step)
             self.n_inserted += 1
@@ -293,12 +422,34 @@ class PLRBuffer:
             return True
         return False
 
+    def top(self, n: int = 25) -> List[Dict[str, Any]]:
+        """The n highest-scoring stored deals, described for reading.
+
+        This is the "what kind of hands need more training" view: these are
+        the deals the net is currently worst on, and `describe_spec` labels
+        their suits by role (U/N/G/g) so a recurring shape can be turned
+        directly into a --require pattern.
+        """
+        ranked = sorted(self._entries.values(), key=lambda e: -e.score)[:n]
+        return [{"score": round(e.score, 4),
+                 "last_used_step": e.last_used,
+                 **describe_spec(e.spec)} for e in ranked]
+
+    def dump(self, path: str, n: int = 25) -> None:
+        """Write stats + the n hardest deals to `path` as JSON."""
+        import json
+        with open(path, "w") as fh:
+            json.dump({"stats": self.stats(), "hardest": self.top(n)},
+                      fh, indent=2)
+
     def stats(self) -> Dict[str, Any]:
         scores = [e.score for e in self._entries.values()]
         return {"size": len(self._entries),
                 "replayed": self.n_replayed,
                 "inserted": self.n_inserted,
                 "evicted": self.n_evicted,
+                "rejected": self.n_rejected,
+                "graduated": self.n_graduated,
                 # Scores below are RATIOS to `typical`, not raw losses: 1.0
                 # means "an average hand for the net as it stands now".
                 "typical": float(self._typical) if self._typical is not None else 0.0,

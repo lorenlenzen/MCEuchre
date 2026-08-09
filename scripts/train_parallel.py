@@ -186,6 +186,8 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
                         replay_prob=cfg["plr_replay_prob"],
                         temperature=cfg["plr_temperature"],
                         staleness_coef=cfg["plr_staleness_coef"],
+                        min_score_ratio=cfg["plr_min_score_ratio"],
+                        warmup=cfg["plr_warmup_hands"],
                         rng=_random.Random(9000 + actor_id))
         base_deal = t.deal_fn or t._default_deal
 
@@ -218,14 +220,24 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
             except Exception:
                 pass  # scoring must never take down an actor
             hands_played += 1
-            # Only actor 0 reports, and only occasionally: 14 actors each
-            # logging their own buffer would drown the learner's eval lines.
-            if actor_id == 0 and hands_played % 250 == 0:
-                s = plr.stats()
-                print(f"  [plr actor0] {s['size']}/{cfg['plr_capacity']} deals, "
-                      f"{s['replayed']} replayed, score "
-                      f"{s['score_min']:.2f}-{s['score_max']:.2f} "
-                      f"(typical loss {s['typical']:.3f})", flush=True)
+            # Every actor dumps its own buffer to its own file -- no IPC, no
+            # contention, and the union across files is the whole picture.
+            # Cadence is per ACTOR while the learner's own counters are
+            # totals across all of them, so this threshold has to be small:
+            # an earlier 250 meant a 400-hand run split over 14 actors
+            # (~29 hands each) reported nothing at all.
+            if hands_played % cfg["plr_dump_every"] == 0:
+                try:
+                    plr.dump(f"{cfg['out']}.plr.actor{actor_id}.json",
+                             n=cfg["plr_dump_top"])
+                except OSError:
+                    pass  # telemetry must never take down an actor
+                if actor_id == 0:
+                    s = plr.stats()
+                    print(f"  [plr actor0] {s['size']}/{cfg['plr_capacity']} "
+                          f"deals, {s['replayed']} replayed, score "
+                          f"{s['score_min']:.2f}-{s['score_max']:.2f} "
+                          f"(typical loss {s['typical']:.3f})", flush=True)
         for s in t.buffer:
             while not stop_flag.value:
                 try:
@@ -387,10 +399,19 @@ def main():
                          "occurred naturally, but replaying them still "
                          "over-weights hard hands against a true uniform "
                          "shuffle. 0.3-0.5 is the usual range.")
-    ap.add_argument("--plr-capacity", type=int, default=1000,
-                    help="(PLR, per actor) how many scored deals each "
-                         "actor's buffer holds. A fresh deal displaces the "
-                         "weakest stored one only if it scores higher.")
+    ap.add_argument("--plr-capacity", type=int, default=250,
+                    help="how many scored deals the buffer holds (per actor). Size it "
+                         "to expected hands-per-actor: roughly 10-20%% of "
+                         "them, so it fills in the first ~quarter of the run "
+                         "and then turns over. Too large and it never fills, "
+                         "so no eviction pressure ever develops (at 29 "
+                         "hands/actor/hour, 250 needs ~14h); too small and "
+                         "each stored deal gets replayed many times, risking "
+                         "overfitting to a handful of hands (at 159 "
+                         "hands/actor/hour, 50 gives ~17 replays each). "
+                         "Note --plr-min-score-ratio already keeps the "
+                         "buffer selective before it fills, so an unfilled "
+                         "buffer costs eviction pressure, not selection.")
     ap.add_argument("--plr-temperature", type=float, default=1.0,
                     help="(PLR) rank-prioritization temperature; weight is "
                          "(1/rank)^(1/T). Lower = greedier toward the "
@@ -403,6 +424,38 @@ def main():
                          "buffer re-measures itself. Measured coverage over "
                          "one buffer's worth of replays: 38%% of entries at "
                          "0.1, 58%% at 0.5.")
+    ap.add_argument("--plr-min-score-ratio", type=float, default=1.0,
+                    help="(PLR) admission gate: a NEW deal must score at "
+                         "least this multiple of the current typical loss "
+                         "to earn a buffer slot. 1.0 = only hands harder "
+                         "than average get stored, which is what makes the "
+                         "buffer a struggle-finder rather than a cache of "
+                         "recent hands. 0.0 restores textbook PLR "
+                         "(unconditional admission until full) -- but a "
+                         "404-hand run over 14 actors leaves each buffer "
+                         "2.9%% full, so nothing would ever be selected on "
+                         "difficulty at all.")
+    ap.add_argument("--plr-warmup-hands", type=int, default=50,
+                    help="(PLR, per actor) deal fresh (never replay) for this many "
+                         "hands first, so replays start from a real "
+                         "population instead of the one or two deals that "
+                         "happened to land first. Nothing is wasted: warmup "
+                         "hands are ordinary self-play hands, trained on and "
+                         "scored as usual -- only replay is suppressed. Also "
+                         "lets the typical-loss level calibrate before the "
+                         "admission gate starts refusing hands.")
+    ap.add_argument("--plr-dump-top", type=int, default=25,
+                    help="(PLR) how many of the hardest stored deals each "
+                         "actor writes to <out>.plr.actor<N>.json, rendered "
+                         "readably with hands keyed by seat position and "
+                         "suits labelled by role (U/N/G/g) so a recurring "
+                         "shape converts straight into a --require pattern.")
+    ap.add_argument("--plr-dump-every", type=int, default=25,
+                    help="(PLR) hands PER ACTOR between buffer dumps. Small "
+                         "on purpose: this counts one actor's hands while "
+                         "the learner's figures are totals across all of "
+                         "them, so a large value reports nothing on short "
+                         "runs.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero state. Worth it after a change "
@@ -579,6 +632,11 @@ def main():
            "plr_capacity": args.plr_capacity,
            "plr_temperature": args.plr_temperature,
            "plr_staleness_coef": args.plr_staleness_coef,
+           "plr_min_score_ratio": args.plr_min_score_ratio,
+           "plr_warmup_hands": args.plr_warmup_hands,
+           "plr_dump_top": args.plr_dump_top,
+           "plr_dump_every": args.plr_dump_every,
+           "out": args.out,
            "equity_table": equity_table_path,
            "engine": args.engine}
 
@@ -592,7 +650,14 @@ def main():
         print(f"PLR: on (replay_prob={args.plr_replay_prob}, "
               f"capacity={args.plr_capacity}/actor, T={args.plr_temperature}, "
               f"staleness={args.plr_staleness_coef}); per-actor buffers, "
-              f"not checkpointed", flush=True)
+              f"not checkpointed; hardest deals -> "
+              f"{args.out}.plr.actor<N>.json", flush=True)
+        if args.plr_replay_prob >= 0.9:
+            print(f"  WARNING: --plr-replay-prob {args.plr_replay_prob} "
+                  f"starves the buffer -- new deals only enter on non-replay "
+                  f"hands, so at 1.0 the first hand is replayed forever "
+                  f"(1 distinct deal over 300 hands, measured). Use <=0.5 "
+                  f"unless you specifically want that.", flush=True)
     print(f"started {args.actors} actors; running {args.minutes:.0f} min",
           flush=True)
 
