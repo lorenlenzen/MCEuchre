@@ -421,6 +421,12 @@ class ReBeLTrainer:
         # internally, so they inherit this too, same as any other override.
         # None (default) preserves exact prior (uniform dealing) behavior.
         self.deal_fn = deal_fn
+        # Populated by each self_play_hand() call: the state as dealt (before
+        # any action) and the samples that hand produced. Exposed so a caller
+        # can score the deal it just played -- see rebel/plr.py, which uses
+        # them to prioritize which deals get replayed.
+        self.last_hand_state = None
+        self.last_hand_samples: List[Sample] = []
         # None (default) preserves exact prior behavior throughout this
         # class: every deal starts 0-0, SubgameSolver gets no equity_model
         # (raw point-differential CFR targets, unchanged), and
@@ -753,6 +759,13 @@ class ReBeLTrainer:
     def _fresh_deal(self):
         if self.deal_fn is not None:
             return self.deal_fn()
+        return self._default_deal()
+
+    def _default_deal(self):
+        """The built-in uniform dealer, split out from _fresh_deal so a
+        `deal_fn` can still reach it -- rebel/plr.py's replay hook needs to
+        fall back to ordinary dealing when it decides NOT to replay, and
+        calling _fresh_deal there would recurse straight back into itself."""
         dealer = self.rng.randint(0, 3)
         team0_score = team1_score = 0
         if self.equity_model is not None:
@@ -1110,6 +1123,13 @@ class ReBeLTrainer:
             state = self._biased_deal()
         else:
             state = self._fresh_deal()
+        # This hand's own samples, exposed as self.last_hand_samples for
+        # per-deal scoring (rebel/plr.py). Deliberately excludes the
+        # value-grounding sample stored above: that comes from a SEPARATE
+        # deal of its own (_grounded_value_sample calls _fresh_deal), so
+        # attributing its loss to this hand would score the wrong deal.
+        hand_samples: List[Sample] = []
+        self.last_hand_state = state
         while not state.is_terminal():
             legal = state.legal_actions()
             if len(legal) == 1:
@@ -1188,12 +1208,14 @@ class ReBeLTrainer:
                 # by prioritized replay -- they're a different (and much
                 # better) kind of estimate for the same position.
                 ckey = ckey + ("exact",)
-            self._store(Sample(
+            sample = Sample(
                 obs=obs,
                 mask=mask,
                 policy=target,
                 value=actor_val,
-                cluster_key=ckey))
+                cluster_key=ckey)
+            self._store(sample)
+            hand_samples.append(sample)
 
             actions = list(policy)
             chosen = self.rng.choices(
@@ -1201,6 +1223,7 @@ class ReBeLTrainer:
             if self.engine == "cpp":
                 chosen = self._cpp.Action.from_index(chosen)
             state = state.apply(chosen)
+        self.last_hand_samples = hand_samples
         return state.returns()
 
     def _store(self, sample: Sample) -> None:

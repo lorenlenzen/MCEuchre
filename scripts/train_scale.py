@@ -10,6 +10,7 @@ and a JSON log.
 import argparse
 import json
 import os
+import random
 import sys
 import time
 
@@ -18,6 +19,8 @@ import torch
 from rebel.train_rebel import ReBeLTrainer, ReBeLNetAgent
 from rebel.evaluate import evaluate, RandomAgent, RuleBasedAgent
 from rebel.match_equity import MatchEquityModel
+from rebel.plr import PLRBuffer, deal_to_spec, score_samples, spec_to_state
+from rebel.eval_log import legacy_log_path, load_resumable_log, log_path_for
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from train_pattern import (constrained_deal, parse_require,  # noqa: E402
@@ -171,6 +174,40 @@ def main() -> None:
                          "the hand from -- still round-1's first decision "
                          "regardless, same as any deal. Without it the "
                          "position is uniformly random.")
+    ap.add_argument("--plr-replay-prob", type=float, default=0.0,
+                    help="enable Prioritized Level Replay: probability that "
+                         "a self-play hand REPLAYS a stored high-loss deal "
+                         "instead of dealing a fresh one (0 = off, the "
+                         "default). Deals are scored by the same per-sample "
+                         "loss cluster_priority already uses, so this is the "
+                         "per-deal version of the existing cluster-level "
+                         "prioritization -- the granularity clusters can't "
+                         "express. Replay re-runs the real CFR solves, so "
+                         "targets are always fresh, never stale stored ones. "
+                         "This is also the dial on distribution shift: the "
+                         "buffer only ever holds deals that occurred "
+                         "naturally, but replaying them still over-weights "
+                         "hard hands relative to a true uniform shuffle. "
+                         "0.3-0.5 is the usual range; 1.0 would train almost "
+                         "entirely on replays and drift furthest.")
+    ap.add_argument("--plr-capacity", type=int, default=1000,
+                    help="(PLR) how many scored deals the buffer holds. A "
+                         "fresh deal displaces the weakest stored one only "
+                         "if it scores higher.")
+    ap.add_argument("--plr-temperature", type=float, default=1.0,
+                    help="(PLR) rank-prioritization temperature; weight is "
+                         "(1/rank)^(1/T). Lower = greedier toward the "
+                         "highest-loss deals.")
+    ap.add_argument("--plr-staleness-coef", type=float, default=0.3,
+                    help="(PLR) fraction of sampling weight given to how "
+                         "long ago a deal was last replayed. Entries have no "
+                         "TTL -- a stored score only refreshes when that "
+                         "deal is sampled again -- so this controls how fast "
+                         "the buffer re-measures itself. Measured coverage "
+                         "over one full buffer's worth of replays: 38%% of "
+                         "entries at 0.1, 58%% at 0.5. Default 0.3 (the "
+                         "published algorithm uses ~0.1, over far smaller "
+                         "level sets).")
     ap.add_argument("--require-max-tries", type=int, default=100,
                     help="(--require only) retries per hand before giving "
                          "up and raising -- constrained_deal PLACES the "
@@ -269,6 +306,31 @@ def main() -> None:
         trainer.deal_fn = _pattern_deal_fn(
             trainer, require_patterns, args.void_up, require_score,
             require_up_ranks, require_seat, args.require_max_tries)
+
+    # PLR layers ON TOP of whatever dealer is already in place: a non-replay
+    # hand falls through to `base_deal` -- the pattern dealer above when
+    # --require is set, the built-in uniform one otherwise -- so --plr and
+    # --require compose (replay the hardest hands *within* the pattern)
+    # rather than one silently overriding the other.
+    plr = None
+    if args.plr_replay_prob > 0.0:
+        plr = PLRBuffer(capacity=args.plr_capacity,
+                        replay_prob=args.plr_replay_prob,
+                        temperature=args.plr_temperature,
+                        staleness_coef=args.plr_staleness_coef,
+                        rng=random.Random(1234))
+        base_deal = trainer.deal_fn or trainer._default_deal
+
+        def plr_deal_fn():
+            if plr.should_replay():
+                return spec_to_state(plr.sample(), trainer)
+            return base_deal()
+
+        trainer.deal_fn = plr_deal_fn
+        print(f"PLR: on (replay_prob={args.plr_replay_prob}, "
+              f"capacity={args.plr_capacity}, T={args.plr_temperature}, "
+              f"staleness={args.plr_staleness_coef})")
+
     if args.resume:
         trainer.net.load_state_dict(torch.load(args.resume))
         print(f"resumed from {args.resume}")
@@ -288,13 +350,35 @@ def main() -> None:
         else:
             print(f"no optimizer state at {opt_path} -- starting Adam fresh")
 
-    log = []
+    # Resume this script's own eval log rather than clobbering it. Starting
+    # a fresh list and dumping it over the old file discarded every prior
+    # run's entries on the same --out -- and, back when both scripts shared
+    # one `<out>.log.json`, a train_parallel.py run's history too. The
+    # strength trend only means anything plotted across the whole training
+    # history, so new entries are appended, with the prior run's final
+    # gen/hands/elapsed carried forward as offsets so the x-axes stay
+    # continuous instead of restarting at zero.
+    log_path = log_path_for(args.out, "scale")
+    log = load_resumable_log(log_path, ("gen", "hands", "elapsed_s"),
+                             legacy_path=legacy_log_path(args.out),
+                             script="train_scale.py")
+    gen_offset = log[-1]["gen"] if log else 0
+    hands_offset = log[-1]["hands"] if log else 0
+    elapsed_offset = log[-1]["elapsed_s"] if log else 0
     total_hands = 0
     t0 = time.time()
     stats = {"policy_loss": 0.0, "value_loss": 0.0}
     for g in range(1, args.generations + 1):
         for _ in range(args.hands_per_gen):
             trainer.self_play_hand()
+            if plr is not None:
+                # Score the deal that was just played -- fresh or replayed
+                # alike. Re-scoring a replay is the point, not redundancy:
+                # its stored score was measured against an older net, and
+                # refreshing it is what lets a deal the net has since
+                # learned fall out of the buffer.
+                plr.update(deal_to_spec(trainer.last_hand_state, args.engine),
+                           score_samples(trainer.net, trainer.last_hand_samples))
         total_hands += args.hands_per_gen
         for _ in range(args.train_steps):
             stats = trainer.train_step(batch_size=128)
@@ -309,8 +393,10 @@ def main() -> None:
                               hands=args.eval_hands, seed=200 + g,
                               stick_the_dealer=args.stick_the_dealer)
             entry = {
-                "gen": g, "hands": total_hands, "buffer": len(trainer.buffer),
-                "elapsed_s": round(time.time() - t0),
+                "gen": gen_offset + g,
+                "hands": hands_offset + total_hands,
+                "buffer": len(trainer.buffer),
+                "elapsed_s": elapsed_offset + round(time.time() - t0),
                 "policy_loss": round(stats["policy_loss"], 4),
                 "value_loss": round(stats["value_loss"], 4),
                 "vs_random": round(s_rand["team0_mean_point_diff"], 3),
@@ -318,15 +404,25 @@ def main() -> None:
                 "vs_rule": round(s_rule["team0_mean_point_diff"], 3),
                 "win_rule": round(s_rule["team0_win_rate"], 3),
             }
+            if plr is not None:
+                st = plr.stats()
+                entry["plr"] = {k: (round(v, 4) if isinstance(v, float) else v)
+                                for k, v in st.items()}
             log.append(entry)
-            print(f"gen {g:>3} | hands {total_hands:>5} | {entry['elapsed_s']:>4}s "
-                  f"| ploss {entry['policy_loss']:.3f} vloss {entry['value_loss']:.3f} "
-                  f"| vs random {entry['vs_random']:+.3f} ({entry['win_random']:.2f}) "
-                  f"| vs rule {entry['vs_rule']:+.3f} ({entry['win_rule']:.2f})",
-                  flush=True)
+            line = (f"gen {entry['gen']:>3} | hands {entry['hands']:>5} "
+                    f"| {entry['elapsed_s']:>4}s "
+                    f"| ploss {entry['policy_loss']:.3f} vloss {entry['value_loss']:.3f} "
+                    f"| vs random {entry['vs_random']:+.3f} ({entry['win_random']:.2f}) "
+                    f"| vs rule {entry['vs_rule']:+.3f} ({entry['win_rule']:.2f})")
+            if plr is not None:
+                st = entry["plr"]
+                line += (f" | plr {st['size']}/{args.plr_capacity} "
+                         f"replayed {st['replayed']} "
+                         f"score {st['score_min']:.2f}-{st['score_max']:.2f}")
+            print(line, flush=True)
             torch.save(trainer.net.state_dict(), args.out + ".pt")
             torch.save(trainer.opt.state_dict(), args.out + ".opt.pt")
-            json.dump(log, open(args.out + ".log.json", "w"), indent=2)
+            json.dump(log, open(log_path, "w"), indent=2)
 
     print(f"\nDone: {total_hands} hands in {time.time() - t0:.0f}s. "
           f"Checkpoint: {args.out}.pt")

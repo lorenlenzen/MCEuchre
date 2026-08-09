@@ -71,38 +71,60 @@ def _atomic_save(state_dict, path, retries=20, delay=0.5):
             time.sleep(delay)
 
 
-def _load_resumable_log(log_path):
+def _load_resumable_log(log_path, legacy_path=None):
     """(log, elapsed_offset, samples_offset) for continuing an eval log at
     `log_path`, or ([], 0, 0) if there's nothing usable to resume.
 
-    A log at this path might belong to a different script's schema --
-    train_scale.py's entries use "gen"/"hands", not this script's
-    "elapsed_s"/"samples" -- if --out was ever reused across scripts (or an
-    older/incompatible version of this one). Blindly trusting the last
-    entry's shape crashed here once already (KeyError on a
-    train_scale-produced log); a mismatch now starts fresh with a warning
-    instead of assuming the file on disk matches what this run is about to
-    write."""
-    if not os.path.exists(log_path):
-        return [], 0, 0
-    try:
-        existing = json.load(open(log_path))
-    except (json.JSONDecodeError, OSError):
-        return [], 0, 0
+    Schema/collision handling lives in rebel/eval_log.py (shared with
+    train_scale.py); this wrapper just reads the offsets this script's own
+    x-axis needs off the last entry."""
+    from rebel.eval_log import load_resumable_log
+    existing = load_resumable_log(log_path, ("elapsed_s", "samples"),
+                                  legacy_path=legacy_path,
+                                  script="train_parallel.py")
     if not existing:
         return [], 0, 0
-    if not all(k in existing[-1] for k in ("elapsed_s", "samples")):
-        print(f"warning: {log_path} exists but doesn't look like a "
-              f"train_parallel.py log (last entry keys: "
-              f"{sorted(existing[-1])}) -- starting a fresh log instead of "
-              f"resuming it. If this --out was previously used by "
-              f"train_scale.py or an older run, move or rename the old log "
-              f"if you want to keep it.", flush=True)
-        return [], 0, 0
-    print(f"resuming eval log from {log_path} ({len(existing)} entries, "
-          f"{existing[-1]['elapsed_s']}s / {existing[-1]['samples']} "
-          f"samples so far)", flush=True)
     return existing, existing[-1]["elapsed_s"], existing[-1]["samples"]
+
+
+def _shutdown_actors(actors, stop_flag, samples_q, drain_secs=2, join_secs=0.5):
+    """Stop every actor process, robust to a SECOND Ctrl-C arriving while
+    this is still running (an impatient response to how long this used to
+    take -- see below). The unconditional terminate pass at the end always
+    runs no matter what happens in the try block above it, or how many
+    times it's interrupted.
+
+    Previously this was one `for a in actors: a.join(timeout=3); if
+    alive: terminate()` loop -- serial, so a large --actors count could
+    take up to actors*3s of silence before the LAST actor even got a
+    terminate() attempt, and a second KeyboardInterrupt during that loop
+    propagated straight out, abandoning whichever actors it hadn't reached
+    yet: never joined, never terminated. Exactly "not all actors stop."
+    Splitting the graceful wait from the terminate pass fixes both: the
+    per-actor wait budget is much shorter (bounding the silent period
+    actors-many times over), and terminate() below runs for every actor
+    regardless of what happened above or how many times it was
+    interrupted -- see test_train_parallel.py's regression test, which
+    reproduces the old failure with a fake actor list and asserts the new
+    shape always terminates all of them.
+    """
+    stop_flag.value = 1
+    try:
+        t_end = time.time() + drain_secs  # let actors blocked on put() exit
+        while time.time() < t_end:
+            try:
+                samples_q.get(timeout=0.2)
+            except queue.Empty:
+                break
+        for a in actors:
+            a.join(timeout=join_secs)
+    except KeyboardInterrupt:
+        pass
+    for a in actors:
+        if a.is_alive():
+            a.terminate()
+    for a in actors:
+        a.join(timeout=2)
 
 
 def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
@@ -139,6 +161,42 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
         equity_model=equity_model,
         engine=engine,
         seed=1000 * actor_id + int(time.time()) % 997)
+
+    # PLR buffers are PER ACTOR, not shared. A shared buffer would have to
+    # be a multiprocessing.Manager proxy, and every should_replay/sample
+    # call would then be an IPC round-trip plus a pickle of the sampling
+    # weights over up to --plr-capacity entries -- on the per-hand hot path,
+    # across every actor. Independent buffers keep that cost at zero and fit
+    # how actors already work (own trainer, own RNG, own weight snapshot).
+    # The learner still benefits from all of them, since every actor's
+    # replayed hands flow into the same sample queue.
+    #
+    # Consequence worth knowing: buffers live only as long as the process,
+    # so a resumed run re-discovers its hard deals from scratch. Deals are
+    # cheap to re-find (a few hundred hands refills a buffer) and the
+    # alternative -- checkpointing 14 buffers and reconciling them on
+    # resume -- costs far more than it saves.
+    plr = None
+    if cfg.get("plr_replay_prob", 0.0) > 0.0:
+        import random as _random
+
+        from rebel.plr import (PLRBuffer, deal_to_spec, score_samples,
+                               spec_to_state)
+        plr = PLRBuffer(capacity=cfg["plr_capacity"],
+                        replay_prob=cfg["plr_replay_prob"],
+                        temperature=cfg["plr_temperature"],
+                        staleness_coef=cfg["plr_staleness_coef"],
+                        rng=_random.Random(9000 + actor_id))
+        base_deal = t.deal_fn or t._default_deal
+
+        def plr_deal_fn():
+            if plr.should_replay():
+                return spec_to_state(plr.sample(), t)
+            return base_deal()
+
+        t.deal_fn = plr_deal_fn
+
+    hands_played = 0
     local_v = -1
     while not stop_flag.value:
         if version.value != local_v:
@@ -153,6 +211,21 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
             t.self_play_hand()
         except Exception:
             continue
+        if plr is not None:
+            try:
+                plr.update(deal_to_spec(t.last_hand_state, engine),
+                           score_samples(t.net, t.last_hand_samples))
+            except Exception:
+                pass  # scoring must never take down an actor
+            hands_played += 1
+            # Only actor 0 reports, and only occasionally: 14 actors each
+            # logging their own buffer would drown the learner's eval lines.
+            if actor_id == 0 and hands_played % 250 == 0:
+                s = plr.stats()
+                print(f"  [plr actor0] {s['size']}/{cfg['plr_capacity']} deals, "
+                      f"{s['replayed']} replayed, score "
+                      f"{s['score_min']:.2f}-{s['score_max']:.2f} "
+                      f"(typical loss {s['typical']:.3f})", flush=True)
         for s in t.buffer:
             while not stop_flag.value:
                 try:
@@ -297,6 +370,39 @@ def main():
                          "an undertrained bidding policy makes for a noisy "
                          "belief signal early on. cpp engine only. Off by "
                          "default.")
+    ap.add_argument("--plr-replay-prob", type=float, default=0.0,
+                    help="enable Prioritized Level Replay: probability that "
+                         "a self-play hand REPLAYS a stored high-loss deal "
+                         "instead of dealing a fresh one (0 = off, the "
+                         "default). Deals are scored by the same per-sample "
+                         "loss cluster_priority already uses, giving the "
+                         "per-DEAL granularity clusters can't express; "
+                         "replay re-runs the real CFR solves, so targets "
+                         "stay fresh rather than being stale stored ones. "
+                         "Each actor keeps its OWN buffer (no cross-process "
+                         "sharing -- see actor_loop) and buffers are not "
+                         "checkpointed, so a resumed run re-discovers its "
+                         "hard deals. This is also the distribution-shift "
+                         "dial: the buffer only ever holds deals that "
+                         "occurred naturally, but replaying them still "
+                         "over-weights hard hands against a true uniform "
+                         "shuffle. 0.3-0.5 is the usual range.")
+    ap.add_argument("--plr-capacity", type=int, default=1000,
+                    help="(PLR, per actor) how many scored deals each "
+                         "actor's buffer holds. A fresh deal displaces the "
+                         "weakest stored one only if it scores higher.")
+    ap.add_argument("--plr-temperature", type=float, default=1.0,
+                    help="(PLR) rank-prioritization temperature; weight is "
+                         "(1/rank)^(1/T). Lower = greedier toward the "
+                         "highest-loss deals.")
+    ap.add_argument("--plr-staleness-coef", type=float, default=0.3,
+                    help="(PLR) fraction of sampling weight given to how "
+                         "long ago a deal was last replayed. Entries have "
+                         "no TTL -- a stored score only refreshes when that "
+                         "deal is sampled again -- so this sets how fast a "
+                         "buffer re-measures itself. Measured coverage over "
+                         "one buffer's worth of replays: 38%% of entries at "
+                         "0.1, 58%% at 0.5.")
     ap.add_argument("--fresh-optimizer", action="store_true",
                     help="ignore the resumed checkpoint's sibling .opt.pt and "
                          "start Adam from zero state. Worth it after a change "
@@ -469,6 +575,10 @@ def main():
            "play_exact_lead_only": args.play_exact_lead_only,
            "play_exact_worlds": args.play_exact_worlds,
            "belief_weight": args.belief_weight_frac,
+           "plr_replay_prob": args.plr_replay_prob,
+           "plr_capacity": args.plr_capacity,
+           "plr_temperature": args.plr_temperature,
+           "plr_staleness_coef": args.plr_staleness_coef,
            "equity_table": equity_table_path,
            "engine": args.engine}
 
@@ -478,6 +588,11 @@ def main():
               for i in range(args.actors)]
     for a in actors:
         a.start()
+    if args.plr_replay_prob > 0.0:
+        print(f"PLR: on (replay_prob={args.plr_replay_prob}, "
+              f"capacity={args.plr_capacity}/actor, T={args.plr_temperature}, "
+              f"staleness={args.plr_staleness_coef}); per-actor buffers, "
+              f"not checkpointed", flush=True)
     print(f"started {args.actors} actors; running {args.minutes:.0f} min",
           flush=True)
 
@@ -492,8 +607,10 @@ def main():
     # this --out is on disk, keep appending to it instead of overwriting,
     # carrying its last elapsed_s/samples forward as an offset so the new
     # entries' x-axis stays continuous instead of jumping back to 0.
-    log_path = args.out + ".log.json"
-    log, elapsed_offset, samples_offset = _load_resumable_log(log_path)
+    from rebel.eval_log import legacy_log_path, log_path_for
+    log_path = log_path_for(args.out, "parallel")
+    log, elapsed_offset, samples_offset = _load_resumable_log(
+        log_path, legacy_path=legacy_log_path(args.out))
     # Accumulates new samples between training steps. Steps are taken at a
     # rate proportional to fresh data (samples_per_step) rather than a fixed
     # count every cycle -- at low actor throughput, a flat step count per
@@ -558,18 +675,7 @@ def main():
                 json.dump(log, open(log_path, "w"), indent=2)
                 last_eval = now
     finally:
-        stop_flag.value = 1
-        # Drain so actors blocked on put() can exit.
-        t_end = time.time() + 3
-        while time.time() < t_end:
-            try:
-                samples_q.get(timeout=0.2)
-            except queue.Empty:
-                break
-        for a in actors:
-            a.join(timeout=3)
-            if a.is_alive():
-                a.terminate()
+        _shutdown_actors(actors, stop_flag, samples_q)
         _atomic_save(net.state_dict(), args.out + ".pt")
         _atomic_save(learner.opt.state_dict(), args.out + ".opt.pt")
         json.dump(log, open(log_path, "w"), indent=2)

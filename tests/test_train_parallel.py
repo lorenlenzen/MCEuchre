@@ -1,4 +1,5 @@
-"""Tests for scripts/train_parallel.py's resumable-eval-log loading.
+"""Tests for scripts/train_parallel.py's resumable-eval-log loading,
+periodic evaluation, and actor shutdown.
 
 Regression coverage for a real crash: pointing --out at a path that already
 had a log.json from train_scale.py (a different schema -- "gen"/"hands"
@@ -11,6 +12,7 @@ import importlib.util
 import json
 import os
 import sys
+from queue import Empty
 
 import pytest
 
@@ -113,3 +115,69 @@ def test_evaluate_extra_opponents_can_override_random_or_rule(tp):
     results = tp._evaluate(net, hands=6, seed=0,
                            extra_opponents={"rule": RandomAgent})
     assert set(results) == {"random", "rule"}
+
+
+# --- _shutdown_actors: robust to a second Ctrl-C arriving mid-cleanup ------
+
+class _FakeActor:
+    def __init__(self):
+        self.alive = True
+        self.terminated = False
+
+    def join(self, timeout=None):
+        pass  # never notices stop_flag in time -- simulates a stuck actor
+
+    def is_alive(self):
+        return self.alive and not self.terminated
+
+    def terminate(self):
+        self.terminated = True
+        self.alive = False
+
+
+class _FakeValue:
+    def __init__(self, value=0):
+        self.value = value
+
+
+class _FakeQueue:
+    def get(self, timeout=None):
+        raise Empty
+
+
+def test_shutdown_actors_terminates_everyone(tp):
+    actors = [_FakeActor() for _ in range(6)]
+    tp._shutdown_actors(actors, _FakeValue(), _FakeQueue())
+    assert all(a.terminated for a in actors)
+    assert _FakeValue().value == 0  # sanity: fixture itself unaffected
+
+
+def test_shutdown_actors_terminates_everyone_despite_second_ctrl_c(tp):
+    """Regression test for the actual reported bug: Ctrl-C during training
+    wasn't stopping all actors. Root cause was the old shutdown code doing
+    `for a in actors: a.join(timeout=3); if alive: terminate()` as ONE
+    loop -- a second KeyboardInterrupt (an impatient response to how long
+    that serial per-actor wait could take) propagated straight out,
+    abandoning whichever actors the loop hadn't reached yet. This
+    reproduces that interrupt deterministically (no real signals, no real
+    processes) and asserts the fixed _shutdown_actors always terminates
+    every actor regardless of when the interrupt lands."""
+    actors = [_FakeActor() for _ in range(14)]
+    real_join = _FakeActor.join
+    calls = {"n": 0}
+
+    def flaky_join(self, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise KeyboardInterrupt
+        return real_join(self, timeout=timeout)
+
+    _FakeActor.join = flaky_join
+    try:
+        tp._shutdown_actors(actors, _FakeValue(), _FakeQueue())
+    finally:
+        _FakeActor.join = real_join
+
+    assert all(a.terminated for a in actors), (
+        f"only {sum(a.terminated for a in actors)}/{len(actors)} terminated "
+        f"-- the second-Ctrl-C bug is back")
