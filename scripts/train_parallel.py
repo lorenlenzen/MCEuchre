@@ -187,7 +187,6 @@ def actor_loop(actor_id, cfg, weights_path, version, samples_q, stop_flag):
                         temperature=cfg["plr_temperature"],
                         staleness_coef=cfg["plr_staleness_coef"],
                         min_score_ratio=cfg["plr_min_score_ratio"],
-                        warmup=cfg["plr_warmup_hands"],
                         rng=_random.Random(9000 + actor_id))
         base_deal = t.deal_fn or t._default_deal
 
@@ -435,20 +434,6 @@ def main():
                          "404-hand run over 14 actors leaves each buffer "
                          "2.9%% full, so nothing would ever be selected on "
                          "difficulty at all.")
-    ap.add_argument("--plr-warmup-hands", type=int, default=10,
-                    help="(PLR, per actor) deal fresh (never replay) for this many "
-                         "hands first, so replays start from a real "
-                         "population instead of the one or two deals that "
-                         "happened to land first. Nothing is wasted: warmup "
-                         "hands are ordinary self-play hands, trained on and "
-                         "scored as usual -- only replay is suppressed. Also "
-                         "lets the typical-loss level calibrate before the "
-                         "admission gate starts refusing hands. Kept small: "
-                         "warmup hands cost the same as any other hand "
-                         "(~2 min at 24 worlds / 60 CFR iters), so 100 is "
-                         "hours per actor -- and since `typical` is now fed "
-                         "only by first-encounter deals it calibrates within "
-                         "~30 hands regardless, measured.")
     ap.add_argument("--plr-dump-top", type=int, default=25,
                     help="(PLR) how many of the hardest stored deals each "
                          "actor writes to <out>.plr.actor<N>.json, rendered "
@@ -638,7 +623,6 @@ def main():
            "plr_temperature": args.plr_temperature,
            "plr_staleness_coef": args.plr_staleness_coef,
            "plr_min_score_ratio": args.plr_min_score_ratio,
-           "plr_warmup_hands": args.plr_warmup_hands,
            "plr_dump_top": args.plr_dump_top,
            "plr_dump_every": args.plr_dump_every,
            "out": args.out,

@@ -238,48 +238,6 @@ def test_score_samples_handles_empty():
     assert score_samples(trainer.net, []) == 0.0
 
 
-# --- warmup: populate before replaying ------------------------------------
-
-def test_warmup_suppresses_replay_until_the_buffer_is_populated():
-    buf = PLRBuffer(capacity=100, replay_prob=1.0, warmup=20,
-                    min_score_ratio=0.0, rng=random.Random(0))
-    for i in range(19):
-        assert not buf.should_replay(), f"replayed during warmup at hand {i}"
-        buf.update(_spec(i), 1.0)
-    buf.update(_spec(19), 1.0)          # 20th observation completes warmup
-    assert buf.should_replay()
-
-
-def test_warmup_bounds_the_replay_prob_one_lock_in():
-    """replay_prob=1.0 still can't grow the buffer afterwards, but warmup
-    means it locks onto `warmup` deals rather than a single one."""
-    for warm, expect in ((0, 1), (40, 40)):
-        buf = PLRBuffer(capacity=250, replay_prob=1.0, warmup=warm,
-                        min_score_ratio=0.0, rng=random.Random(0))
-        for i in range(300):
-            spec = buf.sample() if buf.should_replay() else _spec(i)
-            buf.update(spec, 1.0)
-        assert len(buf) == expect
-
-
-def test_replays_do_not_inflate_typical():
-    """`typical` must mean "what an average FRESH hand costs". Stored deals
-    were selected for being hard, so re-scoring them must not feed the
-    estimate -- otherwise typical drifts up, the gate (a multiple of it)
-    tightens, fewer new deals are admitted, and more replays follow: a
-    feedback loop. Measured at ~1.21 against a true level of 1.0 before the
-    first-encounter-only rule."""
-    buf = PLRBuffer(capacity=20, min_score_ratio=0.0, rng=random.Random(0))
-    fresh = [_spec(i) for i in range(20)]
-    for s in fresh:
-        buf.update(s, 1.0)                       # fresh deals: level 1.0
-    baseline = buf.stats()["typical"]
-    for _ in range(200):                         # many replays, all scoring high
-        buf.update(fresh[0], 5.0)
-    assert buf.stats()["typical"] == pytest.approx(baseline), (
-        f"replays moved typical {baseline:.3f} -> {buf.stats()['typical']:.3f}")
-
-
 def test_typical_is_not_anchored_to_the_first_hand():
     """Bias correction: a plain 1% EMA would leave `typical` dominated by
     hand 1 for ~100 hands, so the admission gate would spend that stretch
@@ -317,7 +275,7 @@ def test_learned_deals_graduate_out_of_the_buffer():
     is FULL and something better arrives, so in an unfilled buffer nothing
     ever left, and the staleness term kept re-drawing it."""
     buf = PLRBuffer(capacity=50, min_score_ratio=1.0, typical_ema=1e-6,
-                    warmup=0, rng=random.Random(0))
+                    rng=random.Random(0))
     buf.update(_spec(0), 1.0)                       # sets typical ~= 1.0
     hard = _spec(1)
     assert buf.update(hard, 1.8) is True            # admitted: 1.8x typical
@@ -332,7 +290,7 @@ def test_buffer_may_drain_when_everything_is_learned():
     """Draining is a legitimate outcome, not a failure -- it just means
     fresh dealing resumes until hard hands turn up again."""
     buf = PLRBuffer(capacity=50, min_score_ratio=1.0, typical_ema=1e-6,
-                    warmup=0, rng=random.Random(0))
+                    rng=random.Random(0))
     buf.update(_spec(0), 1.0)
     specs = [_spec(i) for i in range(1, 11)]
     for s in specs:
@@ -373,12 +331,10 @@ def test_replay_prob_one_starves_the_buffer():
     only reach the buffer on NON-replay hands, so replay_prob=1.0 stores the
     first hand and then replays it forever. Both scripts warn about this.
 
-    warmup=0 here to show the raw mechanism -- the default warmup bounds the
-    damage (see test_warmup_bounds_the_replay_prob_one_lock_in) but does not
-    remove it: the buffer still cannot grow past `warmup` entries."""
+    Both training scripts warn when --plr-replay-prob is >= 0.9."""
     from rebel.plr import PLRBuffer as B
     for prob, expect in ((1.0, 1), (0.5, None)):
-        buf = B(capacity=50, replay_prob=prob, min_score_ratio=0.0, warmup=0,
+        buf = B(capacity=50, replay_prob=prob, min_score_ratio=0.0,
                 rng=random.Random(0))
         for i in range(200):
             spec = buf.sample() if buf.should_replay() else _spec(i)

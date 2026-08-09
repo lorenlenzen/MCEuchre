@@ -216,7 +216,6 @@ class PLRBuffer:
     def __init__(self, capacity: int = 250, replay_prob: float = 0.5,
                  temperature: float = 1.0, staleness_coef: float = 0.3,
                  typical_ema: float = 0.01, min_score_ratio: float = 1.0,
-                 warmup: int = 10,
                  rng: Optional[random.Random] = None) -> None:
         if not 0.0 <= replay_prob <= 1.0:
             raise ValueError(f"replay_prob must be in [0, 1], got {replay_prob}")
@@ -245,27 +244,16 @@ class PLRBuffer:
         # recency cache. Scores are already normalized to `typical` (see
         # update), so the ratio is directly comparable across training eras.
         self.min_score_ratio = min_score_ratio
-        # Deal fresh (never replay) for this many hands, so replays start
-        # from a real population rather than from whatever one or two deals
-        # happened to land first. Nothing is wasted during warmup: those are
-        # ordinary self-play hands, trained on as usual and scored into the
-        # buffer -- the only thing suppressed is replay.
-        #
-        # Deliberately SMALL. Warmup is ordinary full-cost self-play -- a
-        # hand costs whatever a hand costs (~2 min at 24 worlds / 60 CFR
-        # iters), so 100 warmup hands is hours per actor, and there is no
-        # cheap shortcut: a deal's score is the per-sample loss against its
-        # CFR targets, so producing one means actually solving the hand.
-        #
-        # It also does less than it used to. Calibrating `typical` was its
-        # main job, and that is now handled by feeding `typical` only
-        # first-encounter deals plus the bias-corrected weight (see update):
-        # measured, `typical` reaches ~1.0 within 30 hands at warmup 0, 10,
-        # 25 or 100 alike. What remains is minor -- a slightly fuller buffer
-        # before replays begin, and a bound on the replay_prob-near-1.0
-        # lock-in (1 distinct deal -> `warmup` deals), which only matters at
-        # settings that are already degenerate.
-        self.warmup = warmup
+        # Count of FIRST-ENCOUNTER deals scored, driving the bias-corrected
+        # weight in update(). (There was briefly a `warmup` option that
+        # suppressed replay for the first N hands, to give `typical` a
+        # clean sample before the gate started refusing hands. It was
+        # removed: warmup is ordinary full-cost self-play -- a hand costs
+        # ~2 min at 24 worlds / 60 CFR iterations, so it was hours per
+        # actor -- and feeding `typical` only first-encounter deals, plus
+        # this bias correction, already gets it to ~1.0 within 30 hands
+        # whether or not replay is suppressed. Measured across warmup 0,
+        # 10, 25 and 100: no material difference.)
         self._n_obs = 0
         # Running "what does a hand cost right now" level, as an EMA of every
         # raw score observed. Stored scores are kept RELATIVE to this (see
@@ -304,7 +292,7 @@ class PLRBuffer:
         are a degenerate lock, not aggressive prioritization; both training
         scripts warn about it.
         """
-        if not self._entries or self._n_obs < self.warmup:
+        if not self._entries:
             return False
         return self.rng.random() < self.replay_prob
 
@@ -374,7 +362,7 @@ class PLRBuffer:
         # a feedback loop that tightens the gate over the whole run.
         # Measured before this fix: `typical` settled at ~1.21 against a
         # true fresh-deal level of 1.0, i.e. a gate ~20% stricter than
-        # intended, and warmup only postponed it rather than fixing it.
+        # intended.
         #
         # Bias-corrected weight: a plain EMA at 1% would leave `typical`
         # anchored to the FIRST hand's score for ~100 hands (0.99^100 ~ 0.37
