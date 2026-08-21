@@ -1,4 +1,4 @@
-"""End-to-end tour of the MCEuchre stack.
+"""End-to-end tour of the RebelEuchre stack.
 
 Run:  python scripts/demo.py
 

@@ -1,4 +1,4 @@
-# MCEuchre
+# RebelEuchre
 
 A Euchre engine and a self-play AI built toward **expert-level play** using
 **ReBeL** (Recursive Belief-based Learning) — the algorithm that combines

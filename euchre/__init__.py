@@ -1,4 +1,4 @@
-"""MCEuchre: a Euchre engine and ReBeL-based self-play AI."""
+"""RebelEuchre: a Euchre engine and ReBeL-based self-play AI."""
 
 from .cards import (
     Card,

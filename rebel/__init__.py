@@ -1,4 +1,4 @@
-"""ReBeL-oriented learning components for MCEuchre."""
+"""ReBeL-oriented learning components for RebelEuchre."""
 
 from .mccfr import MCCFRTrainer, Node
 from .evaluate import (
