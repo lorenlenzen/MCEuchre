@@ -1,6 +1,40 @@
 # Building the C++ engine
 
-## Prerequisite: MSVC toolchain
+The extension (`mceuchre_cpp`) is a pybind11 + LibTorch build driven by
+`torch.utils.cpp_extension` via `python setup.py build_ext --inplace`, same
+command on every OS -- the difference is entirely in what that command needs
+to find a compiler. It's optional: everything defaults to `engine="python"`
+if it isn't built (see "Engine selector" below).
+
+## Linux
+
+`torch.utils.cpp_extension` auto-detects `g++`/`clang++` correctly out of
+the box here -- none of the MSVC workarounds below apply. Just:
+
+```bash
+sudo apt install build-essential   # if g++/make aren't already present
+pip install ninja                  # optional, speeds up the build
+python setup.py build_ext --inplace
+```
+
+This produces `mceuchre_cpp*.so` in the repo root. `import mceuchre_cpp`
+(or `ReBeLTrainer(engine="cpp")` / `--engine cpp` in the training scripts)
+picks it up automatically. Rebuild after pulling C++ source changes --
+nothing compiled is checked into git (`.gitignore` excludes `*.so`/`build/`),
+so a fresh Linux checkout always starts without the extension built.
+
+`import torch` must happen before `import mceuchre_cpp` (every call site in
+this repo already does, e.g. `rebel/train_rebel.py`) -- torch's own import
+is what makes `libc10.so`/`libtorch_cpu.so` etc. resolvable to the dynamic
+linker; importing the extension first raises `ImportError: libc10.so:
+cannot open shared object file`.
+
+Verified on this Linux build: `setup.py build_ext --inplace` succeeds and
+all 994 cases in `tests/test_cpp_equivalence.py` pass.
+
+## Windows
+
+### Prerequisite: MSVC toolchain
 
 Visual Studio 2022 Build Tools with the C++ workload
 (`Microsoft.VisualStudio.Workload.VCTools`), installed at
@@ -28,7 +62,7 @@ that builds or runs the extension:
 & $PY setup.py build_ext --inplace
 ```
 
-## Environment gotchas specific to this setup (verify before assuming a build failure is a real bug)
+### Environment gotchas specific to this setup (verify before assuming a build failure is a real bug)
 
 - **PowerShell tool calls do not persist shell state between invocations.**
   Every single command needs `. .\cpp\dev_env.ps1` (or equivalent) at its
@@ -44,7 +78,7 @@ that builds or runs the extension:
   fails silently if that directory isn't already on `PATH`. `dev_env.ps1`
   handles this.
 
-## Verified working (this session)
+### Verified working (this session)
 
 A minimal pybind11 + LibTorch extension (`load_inline`, compile a function
 and a tensor op, call both) built and ran successfully via `dev_env.ps1`'s
